@@ -211,7 +211,7 @@ class KP_HOTA(HOTA):
         super().__init__(config)
 
     @_timing.time
-    def eval_sequence(self, data):
+    def eval_sequence(self, data, sigma = 10):
         """
         Evaluates a tracking sequence using the HOTA metric with keypoint distance matching.
 
@@ -232,7 +232,7 @@ class KP_HOTA(HOTA):
             - 'tracker_ids' (list of arrays): Tracker object IDs at each timestep.
             - 'gt_keypoints' (list of (N, 2) arrays): GT keypoints at each timestep.
             - 'tracker_keypoints' (list of (M, 2) arrays): Tracker keypoints at each timestep.
-            - 'similarity_scores' (list of arrays): Precomputed similarity scores per frame (optional).
+            - 'confidence_matrix' (list of arrays): Confidence matrix at each timestep. (frame × gt_ids × tracker_ids)
 
         Returns:
         --------
@@ -269,20 +269,23 @@ class KP_HOTA(HOTA):
         tracker_id_count = np.zeros((1, data['num_tracker_ids']))
 
         # First loop through each timestep and accumulate global track information.
-        for t, (gt_ids_t, tracker_ids_t) in enumerate(zip(data['gt_ids'], data['tracker_ids'])): # this basically loops through the frames, TODO: what if there are no detections in a frame?
+        assert(len(data['gt_ids']) == len(data['tracker_ids']))  # Ensure same number of frames, if not the data was not loaded correctly
+        for t, (gt_ids_t, tracker_ids_t) in enumerate(zip(data['gt_ids'], data['tracker_ids'])): # this basically loops through the frames, if there are no detections in a frame, there's an empty array
             if len(gt_ids_t) == 0 or len(tracker_ids_t) == 0:
                 continue
 
             # Reshape keypoints
-            num_keypoints = (len(data['gt_keypoints'][t][0]) - 2) // 2  # Assuming first 2 cols are frame_id & track_id
-            gt_keypoints_t = np.array([kp[2:].reshape(num_keypoints, 2) for kp in data['gt_keypoints'][t]])
-            tracker_keypoints_t = np.array([kp[2:].reshape(num_keypoints, 2) for kp in data['tracker_keypoints'][t]])
+            num_keypoints = len(data['gt_keypoints'][t][0])
+            gt_keypoints_t = np.array(data['gt_keypoints'][t])
+            tracker_keypoints_t = np.array(data['tracker_keypoints'][t])
+            assert (gt_keypoints_t.shape ==  tracker_keypoints_t.shape)  # Ensure same shape, missing detections should have empty arrays
 
             # Compute keypoint distance matrix
-            dist_matrix = self.compute_keypoint_set_distances(gt_keypoints_t, tracker_keypoints_t)
+            dist_matrix = self.compute_keypoint_distances(gt_keypoints_t, tracker_keypoints_t)
 
             # Convert distance to similarity (Gaussian similarity)
-            similarity = np.exp(-dist_matrix)  # Ensures lower distances give higher similarity
+            confidence_matrix = data['confidence_matrix'][t]  # ensure that uncertain keypoints don’t dominate matching, leave out if confidence too noisy
+            similarity = np.exp(-dist_matrix**2 / (2 * sigma**2)) * confidence_matrix  # lower distances gives higher similarity score
 
             # Accumulate global potential matches count
             potential_matches_count[gt_ids_t[:, np.newaxis], tracker_ids_t[np.newaxis, :]] += similarity
@@ -292,10 +295,13 @@ class KP_HOTA(HOTA):
             tracker_id_count[0, tracker_ids_t] += 1
 
         # Calculate overall Jaccard alignment score (before unique matching)
+        # JAS evaluates how well a tracker maintains correct associations between detections across frames. This helps balance local (frame-wise) and global (over time) associations.
         global_alignment_score = potential_matches_count / (gt_id_count + tracker_id_count - potential_matches_count)
+
+        # Initialize variables for counting matches
         matches_counts = [np.zeros_like(potential_matches_count) for _ in self.array_labels]
 
-        # Calculate scores for each timestep
+        # Calculate scores for each timestep, local track information
         for t, (gt_ids_t, tracker_ids_t) in enumerate(zip(data['gt_ids'], data['tracker_ids'])):
             if len(gt_ids_t) == 0:
                 for a, alpha in enumerate(self.array_labels):
@@ -310,14 +316,11 @@ class KP_HOTA(HOTA):
             gt_keypoints_t = data['gt_keypoints'][t]
             tracker_keypoints_t = data['tracker_keypoints'][t]
 
-            if len(gt_keypoints_t) == 0 or len(tracker_keypoints_t) == 0:
-                continue  # Skip if no keypoints in this frame
+            assert (len(gt_keypoints_t) != 0 and len(tracker_keypoints_t) != 0)  # both should be present, or at least have empty arrays
 
-            # Compute keypoint distance matrix
-            dist_matrix = self.compute_keypoint_distances(gt_keypoints_t, tracker_keypoints_t)
-            similarity = np.exp(-dist_matrix)  # Convert distance to similarity
+            similarity = data['confidence_matrix'][t]
 
-            # Get final matching scores
+            # Get final matching scores - optimize per-frame matches when computing HOTA scores: consistency across frames * local (frame-wise) correctness
             score_mat = global_alignment_score[gt_ids_t[:, None], tracker_ids_t[None, :]] * similarity
 
             # Hungarian algorithm for optimal assignment
@@ -325,7 +328,8 @@ class KP_HOTA(HOTA):
 
             # Calculate and accumulate basic statistics
             for a, alpha in enumerate(self.array_labels):
-                matched_mask = similarity[match_rows, match_cols] >= alpha - np.finfo(float).eps
+                matched_mask = similarity[match_rows, match_cols] >= alpha - np.finfo(float).eps  # optimal matches between the ground truth and tracker objects, which were found using linear_sum_assignment (eps ensures truly >= alpha w numeric precision)
+                # indices for correct matches row - gt, col - tracker
                 alpha_match_rows = match_rows[matched_mask]
                 alpha_match_cols = match_cols[matched_mask]
 
@@ -364,7 +368,7 @@ class KP_HOTA(HOTA):
         N, K, _ = gt_keypoints.shape  # N GT objects, K keypoints per object
         M, _, _ = pred_keypoints.shape  # M predicted objects, K keypoints per object
 
-        dist_matrix = np.zeros((N, M))
+        dist_matrix = np.zeros((N, M))  # Create an empty distance matrix (N, M) to store the average keypoint distances between each pair of GT and predicted objects.
         for i in range(N):
             for j in range(M):
                 # Compute mean Euclidean distance across keypoints

@@ -38,24 +38,47 @@ def test_eval_sequence():
             np.array([[[157, 207], [167, 217], [177, 227]],
                       [[307, 407], [317, 417], [327, 427]]])
         ],
-        'similarity_scores': [
+        'confidence_matrix': [
             np.array([[0.9, 0.1], [0.1, 0.9]]),
             np.array([[0.85, 0.15], [0.15, 0.85]])
         ]
     }
 
-    class DummyEvaluator:
+    class DummyEvaluator(KP_HOTA):
         def __init__(self):
+            super().__init__()
             self.array_labels = [0.5]  # Threshold for matching
             self.float_array_fields = ['HOTA_TP', 'HOTA_FN', 'HOTA_FP', 'LocA', 'AssA', 'AssRe', 'AssPr']
             self.integer_array_fields = []
             self.float_fields = []
 
+        def compute_keypoint_distances(self, gt_keypoints, pred_keypoints):
+            expected_dist_matrix_1 = np.array([
+                [2.82842712, 247.20032],
+                [247.20032, 2.82842712]
+            ])
+            expected_dist_matrix_2 = np.array([
+                [2.82842712, 252.8003164],
+                [247.20032, 2.82842712]
+            ])
+
+            dist_matrix = super().compute_keypoint_distances(gt_keypoints, pred_keypoints)
+
+            # Check if the computed distance matrix matches either of the expected matrices
+            # Check if it matches either expected matrix
+            matches_matrix_1 = np.allclose(dist_matrix, expected_dist_matrix_1, rtol=1e-5)
+            matches_matrix_2 = np.allclose(dist_matrix, expected_dist_matrix_2, rtol=1e-5)
+
+            assert matches_matrix_1 or matches_matrix_2, \
+                f"dist_matrix did not match either expected matrix. Got: {dist_matrix}"
+
+            return dist_matrix
+
         def _compute_final_fields(self, res):
             return res  # Dummy function to keep structure
 
     evaluator = DummyEvaluator()
-    result = KP_HOTA.eval_sequence(evaluator, data)
+    result = evaluator.eval_sequence(data)
 
     # Basic assertions
     assert 'HOTA_TP' in result
