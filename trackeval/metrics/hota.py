@@ -14,7 +14,7 @@ class HOTA(_BaseMetric):
     def __init__(self, config=None):
         super().__init__()
         self.plottable = True
-        self.array_labels = np.arange(0.05, 0.99, 0.05)
+        self.array_labels = np.arange(0.05, 0.99, 0.05)  # alpha values for HOTA
         self.integer_array_fields = ['HOTA_TP', 'HOTA_FN', 'HOTA_FP']
         self.float_array_fields = ['HOTA', 'DetA', 'AssA', 'DetRe', 'DetPr', 'AssRe', 'AssPr', 'LocA', 'OWTA']
         self.float_fields = ['HOTA(0)', 'LocA(0)', 'HOTALocA(0)']
@@ -237,7 +237,7 @@ class KP_HOTA(HOTA):
         Returns:
         --------
         res : dict
-            A dictionary containing computed HOTA-related metrics:
+            A dictionary containing computed HOTA-related metrics as arrays calculated for each alpha value.:
             - 'HOTA_TP', 'HOTA_FP', 'HOTA_FN' (arrays): True/False Positives and False Negatives.
             - 'LocA' (array): Localization accuracy based on keypoint similarity.
             - 'AssA', 'AssRe', 'AssPr' (arrays): Association metrics.
