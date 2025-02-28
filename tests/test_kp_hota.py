@@ -205,7 +205,7 @@ def test_eval_sequence():
                     ],
                     'confidence_matrix': [
                         np.array([[0.9, 0.1], [0.1, 0.9]]),
-                        np.array([[], [], []])  # Missing confidence for frame 2 todo
+                        np.array([[], []])  # Missing confidence for frame 2
                     ]
                 },
                 0.4  # Expected HOTA value for missing predictions for frames
@@ -229,7 +229,7 @@ def test_eval_sequence():
                         np.array([[[152, 202], [162, 212], [172, 222]],
                                   [[298, 398], [308, 408], [318, 418]]]),
                         np.array([[[157, 207], [167, 217], [177, 227]],
-                                  [[], [], []]])  # Missing predictions for object 2 in frame 2 todo
+                                  [[], [], []]], dtype=object)  # Missing predictions for object 2 in frame 2 todo
                     ],
                     'confidence_matrix': [
                         np.array([[0.9, 0.1], [0.1, 0.9]]),
@@ -240,9 +240,11 @@ def test_eval_sequence():
         )
     ]
 )
-def test_kphota_scanarios(data, expected_hota):
+def test_kphota_scenarios(data, expected_hota):
     # Calculate the HOTA score using the 'calculate_hota' function
-    result_hota = KP_HOTA.eval_sequence(data)
+    evaluator = KP_HOTA()
+    result_hota_dict = evaluator.eval_sequence(data)
+    result_hota = sum(result_hota_dict['HOTA']) / len(result_hota_dict['HOTA'])
 
     # Check if the calculated HOTA is within an acceptable tolerance (e.g., ±0.05)
     assert abs(result_hota - expected_hota) < 0.05
@@ -315,7 +317,9 @@ def test_kphota_moreframes():
         ]
     }
 
-    result_hota = KP_HOTA.eval_sequence(data_more_frames)
+    evaluator = KP_HOTA()
+    result_hota_dict = evaluator.eval_sequence(data_more_frames)
+    result_hota = sum(result_hota_dict['HOTA'])/len(result_hota_dict['HOTA'])
     expected_hota = 0.92
     assert abs(result_hota - expected_hota) < 0.05
 
@@ -323,8 +327,37 @@ def test_kphota_moreframes():
 def test_kphota_moreobjects():
     # Dummy test data
     '''
-    same as above but with 3 objects per frame
-    frame 3 only has 2 objects
+    # frame, id, x, y, w, h, x1, y1, v1, x2, y2, v2, x3, y3, v3
+    1, 1, -1, -1, -1, -1, 150, 200, 1, 160, 210, 1, 170,220, 1
+    1, 2, -1, -1, -1, -1, 300, 400, 1, 310, 410, 1, 320, 420, 1
+    1, 3, -1, -1, -1, -1, 450, 500, 1, 460, 510, 1, 470, 520, 1
+    2, 1, -1, -1, -1, -1, 155, 205, 1, 165, 215, 1, 175, 225, 1
+    2, 2, -1, -1, -1, -1, 305, 405, 1, 315, 415, 1, 325, 425, 1
+    2, 3, -1, -1, -1, -1, 455, 505, 1, 465, 515, 1, 475, 525, 1
+    3, 1, -1, -1, -1, -1, 160, 210, 1, 170, 220, 1, 180, 230, 1
+    3, 2, -1, -1, -1, -1, 310, 410, 1, 320, 420, 1, 330, 430, 1
+    4, 1, -1, -1, -1, -1, 165, 215, 1, 175, 225, 1, 185, 235, 1
+    4, 2, -1, -1, -1, -1, 315, 415, 1, 325, 425, 1, 335, 435, 1
+    4, 3, -1, -1, -1, -1, 460, 510, 1, 470, 520, 1, 480, 530, 1
+    5, 1, -1, -1, -1, -1, 170, 220, 1, 180, 230, 1, 190, 240, 1
+    5, 2, -1, -1, -1, -1, 320, 420, 1, 330, 430, 1, 340, 440, 1
+    5, 3, -1, -1, -1, -1, 465, 515, 1, 475, 525, 1, 485, 535, 1
+    this is my pred data:
+    # frame, id, x, y, w, h, confidence, x1, y1, v1, x2, y2, v2, x3, y3, v3
+    1, 1, -1, -1, -1, -1, 0.9, 152, 202, 1, 162, 212, 1, 172, 222, 1
+    1, 2, -1, -1, -1, -1, 0.9, 298, 398, 1, 308, 408, 1,318, 418, 1
+    1, 3, -1, -1, -1, -1, 0.9, 448, 498, 1, 458, 508, 1, 468, 518, 1
+    2, 1, -1, -1, -1, -1, 0.85, 157, 207, 1, 167, 217, 1, 177, 227, 1
+    2, 2, -1, -1, -1, -1, 0.85, 307, 407, 1, 317, 417, 1, 327, 427, 1
+    2, 3, -1, -1, -1, -1, 0.85, 457, 507, 1, 467, 517, 1, 477, 527, 1
+    3, 1, -1, -1, -1, -1, 0.9, 162, 212, 1, 172, 222, 1, 182, 232, 1
+    3, 2, -1, -1, -1, -1, 0.9, 312, 412, 1, 322, 422, 1, 332, 432, 1
+    4, 1, -1, -1, -1, -1, 0.85, 167, 217, 1, 177, 227, 1, 187, 237, 1
+    4, 2, -1, -1, -1, -1, 0.85, 317, 417, 1, 327, 427, 1, 337, 437, 1
+    4, 3, -1, -1, -1, -1, 0.85, 463, 513, 1, 473, 523, 1, 483, 533, 1
+    5, 1, -1, -1, -1, -1, 0.9, 172, 222, 1, 182, 232, 1, 192, 242, 1
+    5, 2, -1, -1, -1, -1, 0.9, 322, 422, 1, 332, 432, 1, 342, 442, 1
+    5, 3, -1, -1, -1, -1, 0.9, 468, 518, 1, 478, 528, 1, 488, 538, 1
     '''
     data_more_objects = {
         'num_tracker_dets': 7,
@@ -370,12 +403,14 @@ def test_kphota_moreobjects():
         'confidence_matrix': [
             np.array([[0.9, 0.05, 0.05], [0.05, 0.9, 0.05], [0.05, 0.05, 0.9]]),
             np.array([[0.85, 0.1, 0.05], [0.1, 0.85, 0.05], [0.05, 0.05, 0.9]]),
-            np.array([[0.9, 0.1, 0.0], [0.1, 0.9, 0.0], [0.0, 0.0, 1.0]]),  # Missing object 2 in frame 3
+            np.array([[0.9, 0.1], [0.1, 0.9]]),  # Missing object 2 in frame 3
             np.array([[0.85, 0.05, 0.1], [0.05, 0.85, 0.1], [0.1, 0.1, 0.8]]),
             np.array([[0.9, 0.05, 0.05], [0.05, 0.9, 0.05], [0.05, 0.05, 0.9]])
         ]
     }
 
-    result_hota = KP_HOTA.eval_sequence(data_more_objects)
+    evaluator = KP_HOTA()
+    result_hota_dict = evaluator.eval_sequence(data_more_objects)
+    result_hota = sum(result_hota_dict['HOTA']) / len(result_hota_dict['HOTA'])
     expected_hota = 0.9
     assert abs(result_hota - expected_hota) < 0.05
