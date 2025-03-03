@@ -274,18 +274,9 @@ class KP_HOTA(HOTA):
             if len(gt_ids_t) == 0 or len(tracker_ids_t) == 0:
                 continue
 
-            # Reshape keypoints
-            num_keypoints = len(data['gt_keypoints'][t][0])
-            gt_keypoints_t = np.array(data['gt_keypoints'][t])
-            tracker_keypoints_t = np.array(data['tracker_keypoints'][t])
-            assert (gt_keypoints_t.shape ==  tracker_keypoints_t.shape)  # Ensure same shape, missing detections should have empty arrays
-
-            # Compute keypoint distance matrix
-            dist_matrix = self.compute_keypoint_distances(gt_keypoints_t, tracker_keypoints_t)
-
-            # Convert distance to similarity (Gaussian similarity)
-            confidence_matrix = data['confidence_matrix'][t]  # ensure that uncertain keypoints don’t dominate matching, leave out if confidence too noisy
-            similarity = np.exp(-dist_matrix**2 / (2 * sigma**2)) * confidence_matrix  # lower distances gives higher similarity score
+            # Compute keypoint distance-based similarity matrix
+            similarity = self.compute_similarity_from_distance(data['gt_keypoints'][t],
+                                                               data['tracker_keypoints'][t], sigma)
 
             # Accumulate global potential matches count
             potential_matches_count[gt_ids_t[:, np.newaxis], tracker_ids_t[np.newaxis, :]] += similarity
@@ -312,13 +303,8 @@ class KP_HOTA(HOTA):
                     res['HOTA_FN'][a] += len(gt_ids_t)
                 continue
 
-            # Extract keypoints
-            gt_keypoints_t = data['gt_keypoints'][t]
-            tracker_keypoints_t = data['tracker_keypoints'][t]
-
-            assert (len(gt_keypoints_t) != 0 and len(tracker_keypoints_t) != 0)  # both should be present, or at least have empty arrays
-
-            similarity = data['confidence_matrix'][t]
+            # Compute keypoint distance-based similarity matrix
+            similarity = self.compute_similarity_from_distance(data['gt_keypoints'][t], data['tracker_keypoints'][t], sigma)
 
             # Get final matching scores - optimize per-frame matches when computing HOTA scores: consistency across frames * local (frame-wise) correctness
             score_mat = global_alignment_score[gt_ids_t[:, None], tracker_ids_t[None, :]] * similarity
@@ -357,6 +343,20 @@ class KP_HOTA(HOTA):
         res = self._compute_final_fields(res)
 
         return res
+
+    def compute_similarity_from_distance(self, gt_kps, pred_kps, sigma):
+        # Extract keypoints
+        gt_keypoints_t = gt_kps
+        tracker_keypoints_t = pred_kps
+        assert (gt_keypoints_t.shape == tracker_keypoints_t.shape)  # Ensure same shape, missing detections should have empty arrays
+
+        # Compute keypoint distance matrix
+        dist_matrix = self.compute_keypoint_distances(gt_keypoints_t, tracker_keypoints_t)
+        # Convert distance to similarity (Gaussian similarity) under consideration of confidence scores
+        confidence_matrix = data['confidence_matrix'][t]  # ensure that uncertain keypoints don’t dominate matching, leave out if confidence too noisy
+        similarity = np.exp(-dist_matrix ** 2 / (2 * sigma ** 2)) * confidence_matrix  # lower distances gives higher similarity score
+
+        return similarity
 
     def compute_keypoint_distances(self, gt_keypoints, pred_keypoints):
         """
