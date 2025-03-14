@@ -336,7 +336,7 @@ class KP_HOTA(HOTA):
                     matches_counts[a][gt_ids_t[alpha_match_rows], tracker_ids_t[alpha_match_cols]] += 1
 
         # Calculate association scores (AssA, AssRe, AssPr) for each alpha
-        for a, alpha in enumerate(self.array_labels): # todo check if it works correctly for gt_id_count and tracker_id_count
+        for a, alpha in enumerate(self.array_labels):
             matches_count = matches_counts[a]
             # Association metrics: calculated first per object and then total weighted average is formed
             # This is just for association, not localization, so we use the counts where there is >= 1 object present&detected
