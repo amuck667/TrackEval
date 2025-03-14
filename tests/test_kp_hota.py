@@ -265,6 +265,7 @@ def test_eval_sequence():
                     ]
                 },
                 0.65  # Expected HOTA value for missing predictions for objects
+        )
     ]
 )
 def test_kphota_scenarios(description, data, expected_hota):
