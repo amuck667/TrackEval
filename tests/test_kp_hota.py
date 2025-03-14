@@ -191,7 +191,7 @@ def test_eval_sequence():
                     'num_gt_ids': 2,
                     'num_tracker_ids': 2,
                     'gt_ids': [np.array([0, 1]), np.array([0, 1])],
-                    'tracker_ids': [np.array([0, 1]), np.array([0, 1])],
+                    'tracker_ids': [np.array([0, 1]), np.array([])],
                     'gt_keypoints': [
                         np.array([[[150, 200], [160, 210], [170, 220]],
                                   [[300, 400], [310, 410], [320, 420]]]),
@@ -201,11 +201,11 @@ def test_eval_sequence():
                     'tracker_keypoints': [
                         np.array([[[152, 202], [162, 212], [172, 222]],
                                   [[298, 398], [308, 408], [318, 418]]]),
-                        np.array([[], [], []]),  # Missing predictions for frame 2
+                        np.array([]),  # Missing predictions for frame 2
                     ],
                     'confidence_matrix': [
                         np.array([[0.9, 0.1], [0.1, 0.9]]),
-                        np.array([[], []])  # Missing confidence for frame 2
+                        np.array([])  # Missing confidence for frame 2
                     ]
                 },
                 0.4  # Expected HOTA value for missing predictions for frames
@@ -213,12 +213,40 @@ def test_eval_sequence():
         (
                 # Missing Predictions for Objects
                 {
-                    'num_tracker_dets': 4,
+                    'num_tracker_dets': 3,  # Number of detections in each frame
+                    'num_gt_dets': 4,  # Number of ground truth objects in each frame
+                    'num_gt_ids': 2,  # Number of ground truth objects in the sequence
+                    'num_tracker_ids': 2,  # Number of detected objects in the sequence
+                    'gt_ids': [np.array([0, 1]), np.array([0, 1])],  # ids for gt objects present in each frame
+                    'tracker_ids': [np.array([0, 1]), np.array([0])],  # ids objects detected in each frame
+                    'gt_keypoints': [
+                        np.array([[[150, 200], [160, 210], [170, 220]],  # frame 1, object 1, keypoints
+                                  [[300, 400], [310, 410], [320, 420]]]),  # frame 1, object 2, keypoints
+                        np.array([[[155, 205], [165, 215], [175, 225]],  # frame 2, object 1, keypoints
+                                  [[305, 405], [315, 415], [325, 425]]])  # frame 2, object 2, keypoints
+                    ],
+                    'tracker_keypoints': [
+                        np.array([[[152, 202], [162, 212], [172, 222]],
+                                  [[298, 398], [308, 408], [318, 418]]]),
+                        np.array([[[157, 207], [167, 217], [177, 227]]])  # Missing predictions for object 2 in frame 2
+                    ],
+                    'confidence_matrix': [
+                        np.array([[0.9, 0.1], [0.1, 0.9]]),
+                        np.array([[0.85],
+                                  [0.15]])  # Missing confidence for object 2 in frame 2
+                    ]
+                },
+                0.65  # Expected HOTA value for missing predictions for objects
+        ),
+        (
+                "Missing Predictions for Objects",
+                {
+                    'num_tracker_dets': 3,
                     'num_gt_dets': 4,
                     'num_gt_ids': 2,
                     'num_tracker_ids': 2,
                     'gt_ids': [np.array([0, 1]), np.array([0, 1])],
-                    'tracker_ids': [np.array([0, 1]), np.array([0, 1])],
+                    'tracker_ids': [np.array([0, 1]), np.array([1])],
                     'gt_keypoints': [
                         np.array([[[150, 200], [160, 210], [170, 220]],
                                   [[300, 400], [310, 410], [320, 420]]]),
@@ -228,12 +256,12 @@ def test_eval_sequence():
                     'tracker_keypoints': [
                         np.array([[[152, 202], [162, 212], [172, 222]],
                                   [[298, 398], [308, 408], [318, 418]]]),
-                        np.array([[[157, 207], [167, 217], [177, 227]],
-                                  [[], [], []]], dtype=object)  # Missing predictions for object 2 in frame 2 todo
+                        np.array([[[307, 407], [317, 417], [327, 427]]])  # Missing predictions for object 1 in frame 2
                     ],
                     'confidence_matrix': [
                         np.array([[0.9, 0.1], [0.1, 0.9]]),
-                        np.array([[0.85, 0.15], [0, 0]])  # Missing confidence for object 2 in frame 2
+                        np.array([[0.15],
+                                [0.85]])  # Missing confidence for object 1 in frame 2
                     ]
                 },
                 0.5  # Expected HOTA value for missing predictions for objects
