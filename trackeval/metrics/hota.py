@@ -276,7 +276,8 @@ class KP_HOTA(HOTA):
 
             # Compute keypoint distance-based similarity matrix
             similarity = self.compute_similarity_from_distance(data['gt_keypoints'][t],
-                                                               data['tracker_keypoints'][t], sigma)
+                                                               data['tracker_keypoints'][t],
+                                                               data['confidence_matrix'][t], sigma)
 
             # Accumulate global potential matches count
             potential_matches_count[gt_ids_t[:, np.newaxis], tracker_ids_t[np.newaxis, :]] += similarity
@@ -303,8 +304,13 @@ class KP_HOTA(HOTA):
                     res['HOTA_FN'][a] += len(gt_ids_t)
                 continue
 
+            gt_keypoints_t = data['gt_keypoints'][t]
+            tracker_keypoints_t = data['tracker_keypoints'][t]
+            confidence_matrix = data['confidence_matrix'][t]
+
             # Compute keypoint distance-based similarity matrix
-            similarity = self.compute_similarity_from_distance(data['gt_keypoints'][t], data['tracker_keypoints'][t], sigma)
+            similarity = self.compute_similarity_from_distance(gt_keypoints_t, tracker_keypoints_t,
+                                                               confidence_matrix, sigma)
 
             # Get final matching scores - optimize per-frame matches when computing HOTA scores: consistency across frames * local (frame-wise) correctness
             score_mat = global_alignment_score[gt_ids_t[:, None], tracker_ids_t[None, :]] * similarity
@@ -344,7 +350,7 @@ class KP_HOTA(HOTA):
 
         return res
 
-    def compute_similarity_from_distance(self, gt_kps, pred_kps, sigma):
+    def compute_similarity_from_distance(self, gt_kps, pred_kps, confidence_matrix, sigma):
         # Extract keypoints
         gt_keypoints_t = gt_kps
         tracker_keypoints_t = pred_kps
@@ -353,7 +359,7 @@ class KP_HOTA(HOTA):
         # Compute keypoint distance matrix
         dist_matrix = self.compute_keypoint_distances(gt_keypoints_t, tracker_keypoints_t)
         # Convert distance to similarity (Gaussian similarity) under consideration of confidence scores
-        confidence_matrix = data['confidence_matrix'][t]  # ensure that uncertain keypoints don’t dominate matching, leave out if confidence too noisy
+        # confidence_matrix ensures that uncertain keypoints don’t dominate matching, leave out if confidence too noisy
         similarity = np.exp(-dist_matrix ** 2 / (2 * sigma ** 2)) * confidence_matrix  # lower distances gives higher similarity score
 
         return similarity
