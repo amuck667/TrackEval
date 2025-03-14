@@ -1,6 +1,7 @@
 
 import os
 import numpy as np
+import scipy.special
 from scipy.optimize import linear_sum_assignment
 from ._base_metric import _BaseMetric
 from .. import _timing
@@ -270,9 +271,9 @@ class KP_HOTA(HOTA):
 
         # First loop through each timestep and accumulate global track information.
         assert(len(data['gt_ids']) == len(data['tracker_ids']))  # Ensure same number of frames, if not the data was not loaded correctly
-        for t, (gt_ids_t, tracker_ids_t) in enumerate(zip(data['gt_ids'], data['tracker_ids'])): # this basically loops through the frames, if there are no detections in a frame, there's an empty array
+        for t, (gt_ids_t, tracker_ids_t) in enumerate(zip(data['gt_ids'], data['tracker_ids'])): # this basically loops through the frames, if there are no gts/detections in a frame, there's an empty array
             if len(gt_ids_t) == 0 or len(tracker_ids_t) == 0:
-                continue
+                continue  # skip for now - missed/extra detections are handled later in local track calculations
 
             # Compute keypoint distance-based similarity matrix
             similarity = self.compute_similarity_from_distance(data['gt_keypoints'][t],
@@ -286,16 +287,16 @@ class KP_HOTA(HOTA):
             gt_id_count[gt_ids_t] += 1
             tracker_id_count[0, tracker_ids_t] += 1
 
-        # Calculate overall Jaccard alignment score (before unique matching)
-        # JAS evaluates how well a tracker maintains correct associations between detections across frames. This helps balance local (frame-wise) and global (over time) associations.
-        global_alignment_score = potential_matches_count / (gt_id_count + tracker_id_count - potential_matches_count)
+        # Apply softmax normalization to the accumulated similarity scores
+        # This evaluates how well a tracker maintains correct associations between detections across frames and helps balance local (frame-wise) and global (over time) associations.
+        global_alignment_score = scipy.special.softmax(potential_matches_count, axis=1)
 
         # Initialize variables for counting matches
         matches_counts = [np.zeros_like(potential_matches_count) for _ in self.array_labels]
 
         # Calculate scores for each timestep, local track information
         for t, (gt_ids_t, tracker_ids_t) in enumerate(zip(data['gt_ids'], data['tracker_ids'])):
-            if len(gt_ids_t) == 0:
+            if len(gt_ids_t) == 0:  # catch missed/extra detections
                 for a, alpha in enumerate(self.array_labels):
                     res['HOTA_FP'][a] += len(tracker_ids_t)
                 continue
@@ -315,8 +316,8 @@ class KP_HOTA(HOTA):
             # Get final matching scores - optimize per-frame matches when computing HOTA scores: consistency across frames * local (frame-wise) correctness
             score_mat = global_alignment_score[gt_ids_t[:, None], tracker_ids_t[None, :]] * similarity
 
-            # Hungarian algorithm for optimal assignment
-            match_rows, match_cols = linear_sum_assignment(-score_mat)
+            # Hungarian algorithm for optimal assignment - gives out the indices of the optimal matches of gt (rows) to tracker (cols)
+            match_rows, match_cols = linear_sum_assignment(-score_mat)  # minimizes cost -> negate similarity to maximize
 
             # Calculate and accumulate basic statistics
             for a, alpha in enumerate(self.array_labels):
@@ -327,16 +328,18 @@ class KP_HOTA(HOTA):
 
                 num_matches = len(alpha_match_rows)
                 res['HOTA_TP'][a] += num_matches
-                res['HOTA_FN'][a] += len(gt_keypoints_t) - num_matches
-                res['HOTA_FP'][a] += len(tracker_keypoints_t) - num_matches
+                res['HOTA_FN'][a] += len(gt_keypoints_t) - num_matches  # GT objects that were not matched = tracker failed to correctly localize any GT objects
+                res['HOTA_FP'][a] += len(tracker_keypoints_t) - num_matches  # Tracker objects that were not matched = tracker provided incorrect detections that are too far from any GT.
 
                 if num_matches > 0:
-                    res['LocA'][a] += np.sum(similarity[alpha_match_rows, alpha_match_cols])
+                    res['LocA'][a] += np.sum(similarity[alpha_match_rows, alpha_match_cols]) # todo checkup if this still makes sense with my calculation of the changed similarity
                     matches_counts[a][gt_ids_t[alpha_match_rows], tracker_ids_t[alpha_match_cols]] += 1
 
         # Calculate association scores (AssA, AssRe, AssPr) for each alpha
-        for a, alpha in enumerate(self.array_labels):
+        for a, alpha in enumerate(self.array_labels): # todo check if it works correctly for gt_id_count and tracker_id_count
             matches_count = matches_counts[a]
+            # Association metrics: calculated first per object and then total weighted average is formed
+            # This is just for association, not localization, so we use the counts where there is >= 1 object present&detected
             ass_a = matches_count / np.maximum(1, gt_id_count + tracker_id_count - matches_count)
             res['AssA'][a] = np.sum(matches_count * ass_a) / np.maximum(1, res['HOTA_TP'][a])
             ass_re = matches_count / np.maximum(1, gt_id_count)
@@ -354,7 +357,6 @@ class KP_HOTA(HOTA):
         # Extract keypoints
         gt_keypoints_t = gt_kps
         tracker_keypoints_t = pred_kps
-        assert (gt_keypoints_t.shape == tracker_keypoints_t.shape)  # Ensure same shape, missing detections should have empty arrays
 
         # Compute keypoint distance matrix
         dist_matrix = self.compute_keypoint_distances(gt_keypoints_t, tracker_keypoints_t)
