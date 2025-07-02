@@ -15,30 +15,35 @@ class MotChallenge2DKeypoints(_BaseDataset):
     def get_default_dataset_config():
         code_path = utils.get_code_path()
         default_config = {
-            'GT_FOLDER': os.path.join(code_path, 'data/gt/mot_challenge/'),
-            'TRACKERS_FOLDER': os.path.join(code_path, 'data/trackers/mot_challenge/'),
+            'GT_FOLDER': os.path.join(code_path, 'data/gt/'),
+            'TRACKERS_FOLDER': os.path.join(code_path, 'data/trackers/'),
             'OUTPUT_FOLDER': None,
             'TRACKERS_TO_EVAL': None,
-            'CLASSES_TO_EVAL': ['pedestrian'],
+            'CLASSES_TO_EVAL': ['left hand', 'right hand', 'scissors', 'tweezers',
+                                'needle holder', 'needle'],
             'BENCHMARK': 'MOT17',
             'SPLIT_TO_EVAL': 'train',
             'INPUT_AS_ZIP': False,
             'PRINT_CONFIG': True,
             'DO_PREPROC': True,
-            'TRACKER_SUB_FOLDER': 'data',
+            'TRACKER_SUB_FOLDER': '',
             'OUTPUT_SUB_FOLDER': '',
             'TRACKER_DISPLAY_NAMES': None,
             'SEQMAP_FOLDER': None,
             'SEQMAP_FILE': None,
             'SEQ_INFO': None,
-            'GT_LOC_FORMAT': '{gt_folder}/{seq}/gt/gt.txt',
-            'SKIP_SPLIT_FOL': False,
+            'GT_LOC_FORMAT': '{gt_folder}/{seq}.txt',
+            'TRACKER_LOC_FORMAT': '{trackers_folder}/{seq}_pred.txt',    # other options include: 'tracker' for multiple trackers and {tracker_sub_fol} for subfolder
+            'SKIP_SPLIT_FOL': True,
         }
         return default_config
 
     def __init__(self, config=None):
+        """Initialise dataset, checking that all required files are present"""
         super().__init__()
+        # Fill non-given config values with defaults
         self.config = utils.init_config(config, self.get_default_dataset_config(), self.get_name())
+
         self.benchmark = self.config['BENCHMARK']
         gt_set = self.config['BENCHMARK'] + '-' + self.config['SPLIT_TO_EVAL']
         self.gt_set = gt_set
@@ -52,11 +57,15 @@ class MotChallenge2DKeypoints(_BaseDataset):
         self.use_super_categories = False
         self.data_is_zipped = self.config['INPUT_AS_ZIP']
         self.do_preproc = self.config['DO_PREPROC']
+
         self.output_fol = self.config['OUTPUT_FOLDER']
         if self.output_fol is None:
             self.output_fol = self.tracker_fol
+
         self.tracker_sub_fol = self.config['TRACKER_SUB_FOLDER']
         self.output_sub_fol = self.config['OUTPUT_SUB_FOLDER']
+
+        # Get classes to eval
         self.class_name_to_class_id = {
             'left hand': 0,
             'right hand': 1,
@@ -66,6 +75,103 @@ class MotChallenge2DKeypoints(_BaseDataset):
             'needle': 5
         }
         self.valid_classes = list(self.class_name_to_class_id.keys())
+        self.class_list = [cls.lower() if cls.lower() in self.valid_classes else None
+                           for cls in self.config['CLASSES_TO_EVAL']]
+        if not all(self.class_list):
+            raise TrackEvalException('Attempted to evaluate an invalid class. Only left hand, right hand, scissors, tweezers, needle holder, and needle classes are valid.')
+        self.valid_class_numbers = list(self.class_name_to_class_id.values())
+
+        # Get sequences to eval and check gt files exist
+        self.seq_list, self.seq_lengths = self._get_seq_info()
+        if len(self.seq_list) < 1:
+            raise TrackEvalException('No sequences are selected to be evaluated.')
+
+        # Check gt files exist
+        for seq in self.seq_list:
+            if not self.data_is_zipped:
+                curr_file = self.config["GT_LOC_FORMAT"].format(gt_folder=self.gt_fol, seq=seq)
+                if not os.path.isfile(curr_file):
+                    print('GT file not found ' + curr_file)
+                    raise TrackEvalException('GT file not found for sequence: ' + seq)
+        if self.data_is_zipped:
+            curr_file = os.path.join(self.gt_fol, 'data.zip')
+            if not os.path.isfile(curr_file):
+                print('GT file not found ' + curr_file)
+                raise TrackEvalException('GT file not found: ' + os.path.basename(curr_file))
+
+        # Get trackers to eval
+        if self.config['TRACKERS_TO_EVAL'] is None:
+            self.tracker_list = os.listdir(self.tracker_fol)
+        else:
+            self.tracker_list = self.config['TRACKERS_TO_EVAL']
+
+        if self.config['TRACKER_DISPLAY_NAMES'] is None:
+            self.tracker_to_disp = dict(zip(self.tracker_list, self.tracker_list))
+        elif (self.config['TRACKERS_TO_EVAL'] is not None) and (
+                len(self.config['TRACKER_DISPLAY_NAMES']) == len(self.tracker_list)):
+            self.tracker_to_disp = dict(zip(self.tracker_list, self.config['TRACKER_DISPLAY_NAMES']))
+        else:
+            raise TrackEvalException('List of tracker files and tracker display names do not match.')
+
+        for tracker in self.tracker_list:
+            if self.data_is_zipped:
+                curr_file = os.path.join(self.tracker_fol, tracker, self.tracker_sub_fol + '.zip')
+                if not os.path.isfile(curr_file):
+                    print('Tracker file not found: ' + curr_file)
+                    raise TrackEvalException(
+                        'Tracker file not found: ' + tracker + '/' + os.path.basename(curr_file))
+            else:
+                for seq in self.seq_list:
+                    curr_file = curr_file = self.config["TRACKER_LOC_FORMAT"].format(trackers_folder=self.tracker_fol, tracker=tracker, tracker_sub_fol=self.tracker_sub_fol,seq=seq)
+                    # curr_file = os.path.join(self.tracker_fol, tracker, self.tracker_sub_fol, seq + '_pred.txt')
+                    if not os.path.isfile(curr_file):
+                        print('Tracker file not found: ' + curr_file)
+                        raise TrackEvalException(
+                            'Tracker file not found: ' + curr_file)
+
+
+    def _get_seq_info(self):
+        seq_list = []
+        seq_lengths = {}
+        if self.config["SEQ_INFO"]:
+            seq_list = list(self.config["SEQ_INFO"].keys())
+            seq_lengths = self.config["SEQ_INFO"]
+
+            # If sequence length is 'None' tries to read sequence length from .ini files.
+            for seq, seq_length in seq_lengths.items():
+                if seq_length is None:
+                    ini_file = os.path.join(self.gt_fol, seq, 'seqinfo.ini')
+                    if not os.path.isfile(ini_file):
+                        raise TrackEvalException('ini file does not exist: ' + seq + '/' + os.path.basename(ini_file))
+                    ini_data = configparser.ConfigParser()
+                    ini_data.read(ini_file)
+                    seq_lengths[seq] = int(ini_data['Sequence']['seqLength'])
+
+        else:
+            if self.config["SEQMAP_FILE"]:
+                seqmap_file = self.config["SEQMAP_FILE"]
+            else:
+                if self.config["SEQMAP_FOLDER"] is None:
+                    seqmap_file = os.path.join(self.config['GT_FOLDER'], 'seqmaps', self.gt_set + '.txt')
+                else:
+                    seqmap_file = os.path.join(self.config["SEQMAP_FOLDER"], self.gt_set + '.txt')
+            if not os.path.isfile(seqmap_file):
+                print('no seqmap found: ' + seqmap_file)
+                raise TrackEvalException('no seqmap found: ' + os.path.basename(seqmap_file))
+            with open(seqmap_file) as fp:
+                reader = csv.reader(fp)
+                for i, row in enumerate(reader):
+                    if i == 0 or row[0] == '':
+                        continue
+                    seq = row[0]
+                    seq_list.append(seq)
+                    ini_file = os.path.join(self.gt_fol, seq, 'seqinfo.ini')
+                    if not os.path.isfile(ini_file):
+                        raise TrackEvalException('ini file does not exist: ' + seq + '/' + os.path.basename(ini_file))
+                    ini_data = configparser.ConfigParser()
+                    ini_data.read(ini_file)
+                    seq_lengths[seq] = int(ini_data['Sequence']['seqLength'])
+        return seq_list, seq_lengths
 
     def _load_raw_file(self, tracker, seq, is_gt):
         # File location
@@ -112,7 +218,7 @@ class MotChallenge2DKeypoints(_BaseDataset):
         return raw_data
 
 
-    def get_processed_seq_data(self, raw_data, cls):
+    def get_preprocessed_seq_data(self, raw_data, cls):
         """
         Preprocess data for a single sequence for a single class for keypoint-based MOT.
         - raw_data: dict from get_raw_seq_data()
