@@ -35,6 +35,7 @@ class MotChallenge2DKeypoints(_BaseDataset):
             'GT_LOC_FORMAT': '{gt_folder}/{seq}.txt',
             'TRACKER_LOC_FORMAT': '{trackers_folder}/{seq}_pred.txt',    # other options include: 'tracker' for multiple trackers and {tracker_sub_fol} for subfolder
             'SKIP_SPLIT_FOL': True,
+            'PREFILTER_RAW': False,  # Whether to filter raw data before parsing, filters by class. For the case if different classes have different amts of keypoints
         }
         return default_config
 
@@ -57,6 +58,7 @@ class MotChallenge2DKeypoints(_BaseDataset):
         self.use_super_categories = False
         self.data_is_zipped = self.config['INPUT_AS_ZIP']
         self.do_preproc = self.config['DO_PREPROC']
+        self.prefilter_raw = self.config['PREFILTER_RAW']
 
         self.output_fol = self.config['OUTPUT_FOLDER']
         if self.output_fol is None:
@@ -201,35 +203,88 @@ class MotChallenge2DKeypoints(_BaseDataset):
             else:
                 file = os.path.join(self.tracker_fol, tracker, self.tracker_sub_fol, seq + '.txt')
         read_data, ignore_data = self._load_simple_text_file(file, is_zipped=self.data_is_zipped, zip_file=zip_file)
-        num_timesteps = self.seq_lengths[seq]
+
+        # checks and setup logic for parsing
+        start_key = int(list(read_data.keys())[0])
+        if self.seq_frame_rates is None:
+            # for backwards compatibility
+            num_timesteps = self.seq_lengths[seq]
+            seq_end = num_timesteps
+            frame_rate = 1
+        else:
+            frame_rate = self.seq_frame_rates[seq]
+            num_timesteps = int(self.seq_lengths[seq] / frame_rate)
+            seq_end = self.seq_lengths[seq]+1  # +1 because range is exclusive
+            # check if data is zero-indexed
+            if '0' in read_data.keys():
+                num_timesteps += 1  # +1 because zero-indexed
+
         data_keys = ['ids', 'keypoints', 'kp_confs']
+        if is_gt:
+            data_keys += ['visbility', 'gt_extras']
+        else:
+            data_keys += ['tracker_confidences']
         raw_data = {key: [None] * num_timesteps for key in data_keys}
-        current_time_keys = [str(t + 1) for t in range(num_timesteps)]
+        current_time_keys = [str(t) for t in range(start_key, seq_end, frame_rate)]
         extra_time_keys = [x for x in read_data.keys() if x not in current_time_keys]
         if len(extra_time_keys) > 0:
             text = 'Ground-truth' if is_gt else 'Tracking'
             raise TrackEvalException(
                 text + ' data contains the following invalid timesteps in seq %s: ' % seq + ', '.join(
                     [str(x) + ', ' for x in extra_time_keys]))
+
+        if self.prefilter_raw:
+            # Some files have different classes with different amounts of keypoints, so we filter the data accordingly
+            read_data = self._filter_data(read_data)
+
+        # parse data
         for t in range(num_timesteps):
-            time_key = str(t + 1)
+            time_key = current_time_keys[t]
             if time_key in read_data.keys():
-                time_data = np.asarray(read_data[time_key], dtype=np.float)
+                time_data = np.asarray(read_data[time_key], dtype=float)
                 raw_data['ids'][t] = np.atleast_1d(time_data[:, 1]).astype(int)
-                kp_cols = time_data[:, 6:]
+                kp_cols = time_data[:, 7:]
                 n_kps = kp_cols.shape[1] // 3
                 keypoints = np.stack([kp_cols[:, i*3:i*3+2] for i in range(n_kps)], axis=1)  # (N, K, 2)
                 kp_confs = np.stack([kp_cols[:, i*3+2] for i in range(n_kps)], axis=1)  # (N, K)
                 raw_data['keypoints'][t] = keypoints
-                raw_data['kp_confs'][t] = kp_confs
+                raw_data['kp_confs'][t] = kp_confs  # visibility or prediciton confidence
             else:
                 raw_data['ids'][t] = np.empty(0).astype(int)
                 raw_data['keypoints'][t] = np.empty((0, 0, 2))
                 raw_data['kp_confs'][t] = np.empty((0, 0))
+
+        if is_gt:
+            key_map = {'ids': 'gt_ids',
+                       'classes': 'gt_classes',
+                       'keypoints': 'gt_dets',
+                       'kp_confs': 'visibility',}
+        else:
+            key_map = {'ids': 'tracker_ids',
+                       'classes': 'tracker_classes',
+                       'keypoints': 'tracker_dets',
+                       'kp_confs': 'confidence_matrix'}
+        for k, v in key_map.items():
+            raw_data[v] = raw_data.pop(k)
         raw_data['num_timesteps'] = num_timesteps
         raw_data['seq'] = seq
         return raw_data
 
+    def _filter_data(self, read_data):
+        # Filter out data that is not relevant for tools
+        filtered_data = {}
+        class_ids = [self.class_name_to_class_id[cls] for cls in self.class_list]
+        for time_key, data in read_data.items():
+            if len(data) == 0:
+                continue
+            # Filter manually due to variable row lengths
+            filtered_rows = [
+                row for row in data
+                if len(row) > 2 and int(row[2]) in class_ids
+            ]
+            if filtered_rows:
+                filtered_data[time_key] = filtered_rows
+        return filtered_data
 
     def get_preprocessed_seq_data(self, raw_data, cls):
         """
