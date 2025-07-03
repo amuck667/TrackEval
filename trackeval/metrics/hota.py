@@ -231,8 +231,8 @@ class KP_HOTA(HOTA):
             - 'num_tracker_ids' (int): Number of unique tracker object IDs.
             - 'gt_ids' (list of arrays): GT object IDs at each timestep.
             - 'tracker_ids' (list of arrays): Tracker object IDs at each timestep.
-            - 'gt_keypoints' (list of (N, 2) arrays): GT keypoints at each timestep.
-            - 'tracker_keypoints' (list of (M, 2) arrays): Tracker keypoints at each timestep.
+            - 'gt_dets' (list of (N, 2) arrays): GT keypoints at each timestep.
+            - 'tracker_dets' (list of (M, 2) arrays): Tracker keypoints at each timestep.
             - 'confidence_matrix' (list of arrays): Confidence matrix at each timestep. (frame × gt_ids × tracker_ids)
 
         Returns:
@@ -276,8 +276,8 @@ class KP_HOTA(HOTA):
                 continue  # skip for now - missed/extra detections are handled later in local track calculations
 
             # Compute keypoint distance-based similarity matrix
-            similarity = self.compute_similarity_from_distance(data['gt_keypoints'][t],
-                                                               data['tracker_keypoints'][t],
+            similarity = self.compute_similarity_from_distance(data['gt_dets'][t],
+                                                               data['tracker_dets'][t],
                                                                data['confidence_matrix'][t], sigma)
 
             # Accumulate global potential matches count
@@ -305,8 +305,8 @@ class KP_HOTA(HOTA):
                     res['HOTA_FN'][a] += len(gt_ids_t)
                 continue
 
-            gt_keypoints_t = data['gt_keypoints'][t]
-            tracker_keypoints_t = data['tracker_keypoints'][t]
+            gt_keypoints_t = data['gt_dets'][t]
+            tracker_keypoints_t = data['tracker_dets'][t]
             confidence_matrix = data['confidence_matrix'][t]
 
             # Compute keypoint distance-based similarity matrix

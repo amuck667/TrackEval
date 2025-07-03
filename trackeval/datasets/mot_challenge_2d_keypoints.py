@@ -244,7 +244,7 @@ class MotChallenge2DKeypoints(_BaseDataset):
         cls_id = self.class_name_to_class_id[cls]
         data_keys = [
             'gt_ids', 'tracker_ids',
-            'gt_keypoints', 'tracker_keypoints',
+            'gt_dets', 'tracker_dets',
             'tracker_confidences'
         ]
         num_timesteps = raw_data['num_timesteps']
@@ -258,23 +258,23 @@ class MotChallenge2DKeypoints(_BaseDataset):
             # GT
             gt_ids = raw_data['gt_ids'][t]
             gt_classes = raw_data['gt_classes'][t]
-            gt_keypoints = raw_data['gt_keypoints'][t]  # shape: (num_gt, num_kp, 2)
+            gt_keypoints = raw_data['gt_dets'][t]  # shape: (num_gt, num_kp, 2)
             # Only keep gt of correct class
             keep_gt = (gt_classes == cls_id)
             data['gt_ids'][t] = gt_ids[keep_gt]
-            data['gt_keypoints'][t] = gt_keypoints[keep_gt]
+            data['gt_dets'][t] = gt_keypoints[keep_gt]
             unique_gt_ids += list(np.unique(data['gt_ids'][t]))
             num_gt_dets += len(data['gt_ids'][t])
 
             # Tracker
             tracker_ids = raw_data['tracker_ids'][t]
             tracker_classes = raw_data['tracker_classes'][t]
-            tracker_keypoints = raw_data['tracker_keypoints'][t]  # shape: (num_tr, num_kp, 2)
+            tracker_keypoints = raw_data['tracker_dets'][t]  # shape: (num_tr, num_kp, 2)
             tracker_confidences = raw_data['tracker_confidences'][t]  # shape: (num_tr, num_kp)
             # Only keep tracker dets of correct class
             keep_tr = (tracker_classes == cls_id)
             data['tracker_ids'][t] = tracker_ids[keep_tr]
-            data['tracker_keypoints'][t] = tracker_keypoints[keep_tr]
+            data['tracker_dets'][t] = tracker_keypoints[keep_tr]
             data['tracker_confidences'][t] = tracker_confidences[keep_tr]
             unique_tracker_ids += list(np.unique(data['tracker_ids'][t]))
             num_tracker_dets += len(data['tracker_ids'][t])

@@ -52,13 +52,13 @@ def test_eval_sequence():
         'num_tracker_ids': 2,
         'gt_ids': [np.array([0, 1]), np.array([0, 1])],
         'tracker_ids': [np.array([0, 1]), np.array([0, 1])],
-        'gt_keypoints': [
+        'gt_dets': [
             np.array([[[150, 200], [160, 210], [170, 220]],
                       [[300, 400], [310, 410], [320, 420]]]),
             np.array([[[155, 205], [165, 215], [175, 225]],
                       [[305, 405], [315, 415], [325, 425]]])
         ],
-        'tracker_keypoints': [
+        'tracker_dets': [
             np.array([[[152, 202], [162, 212], [172, 222]],
                       [[298, 398], [308, 408], [318, 418]]]),
             np.array([[[157, 207], [167, 217], [177, 227]],
@@ -136,13 +136,13 @@ def test_eval_sequence():
                     'num_tracker_ids': 2,
                     'gt_ids': [np.array([0, 1]), np.array([0, 1])],
                     'tracker_ids': [np.array([0, 1]), np.array([0, 1])],
-                    'gt_keypoints': [
+                    'gt_dets': [
                         np.array([[[150, 200], [160, 210], [170, 220]],
                                   [[300, 400], [310, 410], [320, 420]]]),
                         np.array([[[155, 205], [165, 215], [175, 225]],
                                   [[305, 405], [315, 415], [325, 425]]])
                     ],
-                    'tracker_keypoints': [
+                    'tracker_dets': [
                         np.array([[[152, 202], [162, 212], [172, 222]],
                                   [[298, 398], [308, 408], [318, 418]]]),
                         np.array([[[130, 130], [230, 230], [330, 330]],
@@ -164,13 +164,13 @@ def test_eval_sequence():
                     'num_tracker_ids': 2,
                     'gt_ids': [np.array([0, 1]), np.array([0, 1])],
                     'tracker_ids': [np.array([0, 1]), np.array([0, 1])],
-                    'gt_keypoints': [
+                    'gt_dets': [
                         np.array([[[150, 200], [160, 210], [170, 220]],
                                   [[300, 400], [310, 410], [320, 420]]]),
                         np.array([[[155, 205], [165, 215], [175, 225]],
                                   [[305, 405], [315, 415], [325, 425]]])
                     ],
-                    'tracker_keypoints': [
+                    'tracker_dets': [
                         np.array([[[152, 202], [162, 212], [172, 222]],
                                   [[298, 398], [308, 408], [318, 418]]]),
                         np.array([[[157, 207], [167, 217], [177, 227]],
@@ -192,13 +192,13 @@ def test_eval_sequence():
                     'num_tracker_ids': 2,
                     'gt_ids': [np.array([0, 1]), np.array([0, 1])],
                     'tracker_ids': [np.array([0, 1]), np.array([])],
-                    'gt_keypoints': [
+                    'gt_dets': [
                         np.array([[[150, 200], [160, 210], [170, 220]],
                                   [[300, 400], [310, 410], [320, 420]]]),
                         np.array([[[155, 205], [165, 215], [175, 225]],
                                   [[305, 405], [315, 415], [325, 425]]])
                     ],
-                    'tracker_keypoints': [
+                    'tracker_dets': [
                         np.array([[[152, 202], [162, 212], [172, 222]],
                                   [[298, 398], [308, 408], [318, 418]]]),
                         np.array([]),  # Missing predictions for frame 2
@@ -219,13 +219,13 @@ def test_eval_sequence():
                     'num_tracker_ids': 2,  # Number of detected objects in the sequence
                     'gt_ids': [np.array([0, 1]), np.array([0, 1])],  # ids for gt objects present in each frame
                     'tracker_ids': [np.array([0, 1]), np.array([0])],  # ids objects detected in each frame
-                    'gt_keypoints': [
+                    'gt_dets': [
                         np.array([[[150, 200], [160, 210], [170, 220]],  # frame 1, object 1, keypoints
                                   [[300, 400], [310, 410], [320, 420]]]),  # frame 1, object 2, keypoints
                         np.array([[[155, 205], [165, 215], [175, 225]],  # frame 2, object 1, keypoints
                                   [[305, 405], [315, 415], [325, 425]]])  # frame 2, object 2, keypoints
                     ],
-                    'tracker_keypoints': [
+                    'tracker_dets': [
                         np.array([[[152, 202], [162, 212], [172, 222]],
                                   [[298, 398], [308, 408], [318, 418]]]),
                         np.array([[[157, 207], [167, 217], [177, 227]]])  # Missing predictions for object 2 in frame 2
@@ -247,13 +247,13 @@ def test_eval_sequence():
                     'num_tracker_ids': 2,
                     'gt_ids': [np.array([0, 1]), np.array([0, 1])],
                     'tracker_ids': [np.array([0, 1]), np.array([1])],
-                    'gt_keypoints': [
+                    'gt_dets': [
                         np.array([[[150, 200], [160, 210], [170, 220]],
                                   [[300, 400], [310, 410], [320, 420]]]),
                         np.array([[[155, 205], [165, 215], [175, 225]],
                                   [[305, 405], [315, 415], [325, 425]]])
                     ],
-                    'tracker_keypoints': [
+                    'tracker_dets': [
                         np.array([[[152, 202], [162, 212], [172, 222]],
                                   [[298, 398], [308, 408], [318, 418]]]),
                         np.array([[[307, 407], [317, 417], [327, 427]]])  # Missing predictions for object 1 in frame 2
@@ -313,7 +313,7 @@ def test_kphota_moreframes():
         'num_tracker_ids': 2,
         'gt_ids': [np.array([0, 1]), np.array([0, 1]), np.array([0, 1]), np.array([0, 1]), np.array([0, 1])],
         'tracker_ids': [np.array([0, 1]), np.array([0, 1]), np.array([0, 1]), np.array([0, 1]), np.array([0, 1])],
-        'gt_keypoints': [
+        'gt_dets': [
             np.array([[[150, 200], [160, 210], [170, 220]],
                       [[300, 400], [310, 410], [320, 420]]]),
             np.array([[[155, 205], [165, 215], [175, 225]],
@@ -325,7 +325,7 @@ def test_kphota_moreframes():
             np.array([[[170, 220], [180, 230], [190, 240]],
                       [[320, 420], [330, 430], [340, 440]]])
         ],
-        'tracker_keypoints': [
+        'tracker_dets': [
             np.array([[[152, 202], [162, 212], [172, 222]],
                       [[298, 398], [308, 408], [318, 418]]]),
             np.array([[[157, 207], [167, 217], [177, 227]],
@@ -397,7 +397,7 @@ def test_kphota_moreobjects():
                    np.array([0, 1, 2])],
         'tracker_ids': [np.array([0, 1, 2]), np.array([0, 1, 2]), np.array([0, 1]), np.array([0, 1, 2]),
                         np.array([0, 1, 2])],
-        'gt_keypoints': [
+        'gt_dets': [
             np.array([[[150, 200], [160, 210], [170, 220]],
                       [[300, 400], [310, 410], [320, 420]],
                       [[450, 500], [460, 510], [470, 520]]]),
@@ -413,7 +413,7 @@ def test_kphota_moreobjects():
                       [[320, 420], [330, 430], [340, 440]],
                       [[465, 515], [475, 525], [485, 535]]])
         ],
-        'tracker_keypoints': [
+        'tracker_dets': [
             np.array([[[152, 202], [162, 212], [172, 222]],
                       [[298, 398], [308, 408], [318, 418]],
                       [[448, 498], [458, 508], [468, 518]]]),
