@@ -133,20 +133,27 @@ class MotChallenge2DKeypoints(_BaseDataset):
     def _get_seq_info(self):
         seq_list = []
         seq_lengths = {}
+        seq_frame_rates = {}
+
         if self.config["SEQ_INFO"]:
             seq_list = list(self.config["SEQ_INFO"].keys())
             seq_lengths = self.config["SEQ_INFO"]
 
             # If sequence length is 'None' tries to read sequence length from .ini files.
             for seq, seq_length in seq_lengths.items():
-                if seq_length is None:
-                    ini_file = os.path.join(self.gt_fol, seq, 'seqinfo.ini')
-                    if not os.path.isfile(ini_file):
-                        raise TrackEvalException('ini file does not exist: ' + seq + '/' + os.path.basename(ini_file))
-                    ini_data = configparser.ConfigParser()
-                    ini_data.read(ini_file)
-                    seq_lengths[seq] = int(ini_data['Sequence']['seqLength'])
+                if isinstance(seq_length, dict): # added to include frame rate which is needed for parsing raw data file
+                    seq_list.append(seq)
+                    seq_lengths[seq] = seq_length.get('length')
+                    seq_frame_rates[seq] = seq_length.get('frame_rate')
+                else:
+                    seq_list.append(seq)
+                    seq_lengths[seq] = seq_length
+                    seq_frame_rates[seq] = None
 
+                if seq_length is None:
+                    ini_data = self._get_ini_data(seq)
+                    seq_lengths[seq] = int(ini_data['Sequence']['seqLength'])
+                    seq_frame_rates[seq] = int(ini_data['Sequence']['frameRate'])
         else:
             if self.config["SEQMAP_FILE"]:
                 seqmap_file = self.config["SEQMAP_FILE"]
@@ -165,13 +172,19 @@ class MotChallenge2DKeypoints(_BaseDataset):
                         continue
                     seq = row[0]
                     seq_list.append(seq)
-                    ini_file = os.path.join(self.gt_fol, seq, 'seqinfo.ini')
-                    if not os.path.isfile(ini_file):
-                        raise TrackEvalException('ini file does not exist: ' + seq + '/' + os.path.basename(ini_file))
-                    ini_data = configparser.ConfigParser()
-                    ini_data.read(ini_file)
+                    ini_data = self._get_ini_data(seq)
                     seq_lengths[seq] = int(ini_data['Sequence']['seqLength'])
+                    seq_frame_rates[seq] = int(ini_data['Sequence']['frameRate'])
+        self.seq_frame_rates = seq_frame_rates
         return seq_list, seq_lengths
+
+    def _get_ini_data(self, seq):
+        ini_file = os.path.join(self.gt_fol, seq, 'seqinfo.ini')
+        if not os.path.isfile(ini_file):
+            raise TrackEvalException('ini file does not exist: ' + seq + '/' + os.path.basename(ini_file))
+        ini_data = configparser.ConfigParser()
+        ini_data.read(ini_file)
+        return ini_data
 
     def _load_raw_file(self, tracker, seq, is_gt):
         # File location
