@@ -2,7 +2,6 @@ import os
 import csv
 import configparser
 import numpy as np
-from scipy.optimize import linear_sum_assignment
 from ._base_dataset import _BaseDataset
 from .. import utils
 from .. import _timing
@@ -201,7 +200,7 @@ class MotChallenge2DKeypoints(_BaseDataset):
             if is_gt:
                 file = self.config["GT_LOC_FORMAT"].format(gt_folder=self.gt_fol, seq=seq)
             else:
-                file = os.path.join(self.tracker_fol, tracker, self.tracker_sub_fol, seq + '.txt')
+                file = self.config["TRACKER_LOC_FORMAT"].format(trackers_folder=self.tracker_fol, tracker=tracker, tracker_sub_fol=self.tracker_sub_fol,seq=seq)
         read_data, ignore_data = self._load_simple_text_file(file, is_zipped=self.data_is_zipped, zip_file=zip_file)
 
         # checks and setup logic for parsing
@@ -219,11 +218,11 @@ class MotChallenge2DKeypoints(_BaseDataset):
             if '0' in read_data.keys():
                 num_timesteps += 1  # +1 because zero-indexed
 
-        data_keys = ['ids', 'keypoints', 'kp_confs']
+        data_keys = ['ids', 'keypoints', 'kp_confs', 'classes']
         if is_gt:
-            data_keys += ['visbility', 'gt_extras']
+            data_keys += ['visibility', 'gt_extras']
         else:
-            data_keys += ['tracker_confidences']
+            data_keys += ['confidence_matrix']
         raw_data = {key: [None] * num_timesteps for key in data_keys}
         current_time_keys = [str(t) for t in range(start_key, seq_end, frame_rate)]
         extra_time_keys = [x for x in read_data.keys() if x not in current_time_keys]
@@ -236,23 +235,31 @@ class MotChallenge2DKeypoints(_BaseDataset):
         if self.prefilter_raw:
             # Some files have different classes with different amounts of keypoints, so we filter the data accordingly
             read_data = self._filter_data(read_data)
+        else:
+            print("Warning: Prefiltering of raw data is disabled. Data must be consistent in length.")
 
         # parse data
         for t in range(num_timesteps):
             time_key = current_time_keys[t]
             if time_key in read_data.keys():
-                time_data = np.asarray(read_data[time_key], dtype=float)
-                raw_data['ids'][t] = np.atleast_1d(time_data[:, 1]).astype(int)
+                data = read_data[time_key]
+                if not is_gt: # trackers can output different length of keypoints. In this case we truncate to the minimum length of kps - THIS MEANS THAT AN ITEM WAS MISSCLASSIFIED (e.g. a hand was detected as a tool)
+                    min_len = min(len(sub) for sub in data)
+                    data = [sub[:min_len] for sub in data]
+                time_data = np.asarray(data, dtype=float)
+                raw_data['ids'][t] = np.atleast_1d(time_data[:, 1]).astype(int)  # index 1 = tracking ids
                 kp_cols = time_data[:, 7:]
                 n_kps = kp_cols.shape[1] // 3
                 keypoints = np.stack([kp_cols[:, i*3:i*3+2] for i in range(n_kps)], axis=1)  # (N, K, 2)
                 kp_confs = np.stack([kp_cols[:, i*3+2] for i in range(n_kps)], axis=1)  # (N, K)
                 raw_data['keypoints'][t] = keypoints
-                raw_data['kp_confs'][t] = kp_confs  # visibility or prediciton confidence
+                raw_data['kp_confs'][t] = kp_confs  # visibility or prediction confidence
+                raw_data['classes'][t] = np.atleast_1d(time_data[:, 2]).astype(int)  # index 2 = class ids
             else:
                 raw_data['ids'][t] = np.empty(0).astype(int)
                 raw_data['keypoints'][t] = np.empty((0, 0, 2))
                 raw_data['kp_confs'][t] = np.empty((0, 0))
+                raw_data['classes'][t] = np.empty(0).astype(int)
 
         if is_gt:
             key_map = {'ids': 'gt_ids',
@@ -300,7 +307,7 @@ class MotChallenge2DKeypoints(_BaseDataset):
         data_keys = [
             'gt_ids', 'tracker_ids',
             'gt_dets', 'tracker_dets',
-            'tracker_confidences'
+            'confidence_matrix'
         ]
         num_timesteps = raw_data['num_timesteps']
         data = {k: [None] * num_timesteps for k in data_keys}
@@ -325,12 +332,12 @@ class MotChallenge2DKeypoints(_BaseDataset):
             tracker_ids = raw_data['tracker_ids'][t]
             tracker_classes = raw_data['tracker_classes'][t]
             tracker_keypoints = raw_data['tracker_dets'][t]  # shape: (num_tr, num_kp, 2)
-            tracker_confidences = raw_data['tracker_confidences'][t]  # shape: (num_tr, num_kp)
+            tracker_confidences = raw_data['confidence_matrix'][t]  # shape: (num_tr, num_kp)
             # Only keep tracker dets of correct class
             keep_tr = (tracker_classes == cls_id)
             data['tracker_ids'][t] = tracker_ids[keep_tr]
             data['tracker_dets'][t] = tracker_keypoints[keep_tr]
-            data['tracker_confidences'][t] = tracker_confidences[keep_tr]
+            data['confidence_matrix'][t] = tracker_confidences[keep_tr]
             unique_tracker_ids += list(np.unique(data['tracker_ids'][t]))
             num_tracker_dets += len(data['tracker_ids'][t])
 
