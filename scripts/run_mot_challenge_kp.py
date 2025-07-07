@@ -13,7 +13,7 @@ if __name__ == '__main__':
     default_eval_config = trackeval.Evaluator.get_default_eval_config()
     default_eval_config['DISPLAY_LESS_PROGRESS'] = False
     default_dataset_config = trackeval.datasets.MotChallenge2DKeypoints.get_default_dataset_config()
-    default_metrics_config = {'METRICS': ['KP_HOTA'], 'THRESHOLD': 0.5}
+    default_metrics_config = {'METRICS': ['HOTA'], 'THRESHOLD': 0.5}
     config = {**default_eval_config, **default_dataset_config, **default_metrics_config}
     parser = argparse.ArgumentParser()
     for setting in config.keys():
