@@ -307,7 +307,7 @@ class MotChallenge2DKeypoints(_BaseDataset):
         data_keys = [
             'gt_ids', 'tracker_ids',
             'gt_dets', 'tracker_dets',
-            'confidence_matrix'
+            'confidence_matrix', 'similarity_scores'
         ]
         num_timesteps = raw_data['num_timesteps']
         data = {k: [None] * num_timesteps for k in data_keys}
@@ -333,6 +333,7 @@ class MotChallenge2DKeypoints(_BaseDataset):
             tracker_classes = raw_data['tracker_classes'][t]
             tracker_keypoints = raw_data['tracker_dets'][t]  # shape: (num_tr, num_kp, 2)
             tracker_confidences = raw_data['confidence_matrix'][t]  # shape: (num_tr, num_kp)
+            similarity_scores = raw_data['similarity_scores'][t]
             # Only keep tracker dets of correct class
             keep_tr = (tracker_classes == cls_id)
             data['tracker_ids'][t] = tracker_ids[keep_tr]
@@ -340,6 +341,8 @@ class MotChallenge2DKeypoints(_BaseDataset):
             data['confidence_matrix'][t] = tracker_confidences[keep_tr]
             unique_tracker_ids += list(np.unique(data['tracker_ids'][t]))
             num_tracker_dets += len(data['tracker_ids'][t])
+
+            data['similarity_scores'][t] = similarity_scores[np.ix_(keep_gt, keep_tr)]  # select the submatrix where both masks are True, shape: (num_true_gt, num_true_tr)
 
         # Relabel IDs to contiguous
         if len(unique_gt_ids) > 0:
@@ -368,18 +371,29 @@ class MotChallenge2DKeypoints(_BaseDataset):
         return data
 
 
-    def _calculate_similarities(self, gt_keypoints, tracker_keypoints, zero_distance=2.0):
+    def _calculate_similarities(self, gt_keypoints, tracker_keypoints, sigma=10):
         # gt_keypoints: (N, K, 2), tracker_keypoints: (M, K, 2)
         if gt_keypoints.shape[0] == 0 or tracker_keypoints.shape[0] == 0:
             return np.zeros((gt_keypoints.shape[0], tracker_keypoints.shape[0]))
         # If number of keypoints differs, only compare up to the minimum
+        if gt_keypoints.shape[1] != tracker_keypoints.shape[1]:
+            print(f"Warning: truncating keypoints to the minimum number of keypoints in gt and tracker. GT: {gt_keypoints.shape[1]}, Tracker: {tracker_keypoints.shape[1]}")
         min_kps = min(gt_keypoints.shape[1], tracker_keypoints.shape[1])
         gt_kps = gt_keypoints[:, :min_kps, :]
         trk_kps = tracker_keypoints[:, :min_kps, :]
         # Compute mean Euclidean distance for each pair
-        dist = np.zeros((gt_kps.shape[0], trk_kps.shape[0]))
-        for i in range(gt_kps.shape[0]):
-            for j in range(trk_kps.shape[0]):
-                dist[i, j] = np.mean(np.linalg.norm(gt_kps[i] - trk_kps[j], axis=1))
-        sim = np.maximum(0, 1 - dist / zero_distance)
-        return sim
+        N, K, _ = gt_kps.shape  # N GT objects, K keypoints per object
+        M, _, _ = trk_kps.shape  # M predicted objects, K keypoints per object
+
+        # Create an empty distance matrix (N, M) to store the average keypoint distances between each pair of GT and predicted objects.
+        dist_matrix = np.zeros((N,M))
+
+        # Calculate the mean Euclidean distance between each pair of GT and predicted objects
+        for i in range(N):
+            for j in range(M):
+                # Compute mean Euclidean distance across keypoints
+                dist_matrix[i, j] = np.mean(np.linalg.norm(gt_kps[i] - trk_kps[j], axis=1))
+        # Convert distance to similarity (Gaussian similarity)
+        similarity = np.exp(-dist_matrix ** 2 / (
+                    2 * sigma ** 2))  # lower distances gives higher similarity score
+        return similarity
