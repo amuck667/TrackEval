@@ -35,6 +35,7 @@ class MotChallenge2DKeypoints(_BaseDataset):
             'TRACKER_LOC_FORMAT': '{trackers_folder}/{seq}_pred.txt',    # other options include: 'tracker' for multiple trackers and {tracker_sub_fol} for subfolder
             'SKIP_SPLIT_FOL': True,
             'PREFILTER_RAW': False,  # Whether to filter raw data before parsing, filters by class. For the case if different classes have different amts of keypoints
+            'PLOT_CURVES': False,
         }
         return default_config
 
@@ -123,13 +124,17 @@ class MotChallenge2DKeypoints(_BaseDataset):
                         'Tracker file not found: ' + tracker + '/' + os.path.basename(curr_file))
             else:
                 for seq in self.seq_list:
-                    curr_file = curr_file = self.config["TRACKER_LOC_FORMAT"].format(trackers_folder=self.tracker_fol, tracker=tracker, tracker_sub_fol=self.tracker_sub_fol,seq=seq)
-                    # curr_file = os.path.join(self.tracker_fol, tracker, self.tracker_sub_fol, seq + '_pred.txt')
+                    curr_file = self.config["TRACKER_LOC_FORMAT"].format(trackers_folder=self.tracker_fol, tracker=tracker, tracker_sub_fol=self.tracker_sub_fol,seq=seq)
                     if not os.path.isfile(curr_file):
                         print('Tracker file not found: ' + curr_file)
                         raise TrackEvalException(
                             'Tracker file not found: ' + curr_file)
 
+
+    def get_output_fol(self, tracker):
+        if tracker.endswith('.txt'):
+            tracker = ''  # if file structure isn't built with different trackers as folders (i.e. only one tracker is evaluated and files are directly in the tracker folder)
+        return os.path.join(self.output_fol, tracker, self.output_sub_fol)
 
     def _get_seq_info(self):
         seq_list = []
