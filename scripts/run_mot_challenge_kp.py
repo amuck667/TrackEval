@@ -41,17 +41,42 @@ if __name__ == '__main__':
                 x = args[setting]
             config[setting] = x
     eval_config = {k: v for k, v in config.items() if k in default_eval_config.keys()}
-    dataset_config = {k: v for k, v in config.items() if k in default_dataset_config.keys()}
+    dataset_config1 = {k: v for k, v in config.items() if k in default_dataset_config.keys()}
+    dataset_config2 = {k: v for k, v in config.items() if k in default_dataset_config.keys()}
     metrics_config = {k: v for k, v in config.items() if k in default_metrics_config.keys()}
+
+    # hands and tools must be evaluated separately
+    dataset_config1["SEQ_INFO"] = { 'P11H': {'length': 1740, 'frame_rate': 29}, }
+    dataset_config1['CLASSES_TO_EVAL'] = ['scissors', 'tweezers', 'needle holder', 'needle']
+    dataset_config1['PREFILTER_RAW'] = True
+    dataset_config1['OUTPUT_SUB_FOLDER'] = 'tools'
+    dataset_config2["SEQ_INFO"] = {'P11H': {'length': 1740, 'frame_rate': 29}, }
+    dataset_config2['CLASSES_TO_EVAL'] = ['left hand', 'right hand']
+    dataset_config2['PREFILTER_RAW'] = True
+    dataset_config2['OUTPUT_SUB_FOLDER'] = 'hands'
 
     # Run code
     evaluator = trackeval.Evaluator(eval_config)
-    dataset_list = [trackeval.datasets.MotChallenge2DKeypoints(dataset_config)]
+    dataset_list = [trackeval.datasets.MotChallenge2DKeypoints(dataset_config1)]
+    dataset_list2 = [trackeval.datasets.MotChallenge2DKeypoints(dataset_config2)]
     metrics_list = []
-    # Only KP_HOTA is supported here
-    if 'KP_HOTA' in metrics_config['METRICS']:
-        metrics_list.append(trackeval.metrics.KP_HOTA(metrics_config))
+
+    if 'HOTA' in metrics_config['METRICS']:
+        metrics_list.append(trackeval.metrics.HOTA(metrics_config))
     if len(metrics_list) == 0:
         raise Exception('No metrics selected for evaluation')
-    evaluator.evaluate(dataset_list, metrics_list)
+
+    results = evaluator.evaluate(dataset_list, metrics_list)[0]['MotChallenge2DKeypoints']
+    results2 = evaluator.evaluate(dataset_list2, metrics_list)[0]['MotChallenge2DKeypoints']
+    # combine results from hands and tools
+    combined_seq = {}
+    for tracker in results.keys():
+        if tracker in results2:
+            combined_seq1 = results[tracker]['COMBINED_SEQ']
+            combined_seq2 = results2[tracker]['COMBINED_SEQ']
+            combined_seq = {**combined_seq1, **combined_seq2}
+            combined_hota_seq = {cls_key: cls_value['HOTA'] for cls_key, cls_value in combined_seq.items()}
+            final_res_all = metrics_list[0].combine_classes_class_averaged(combined_hota_seq)
+            result_hota = sum(final_res_all['HOTA'])/len(final_res_all['HOTA'])
+            print(f"Combined HOTA for tracker {tracker}: {result_hota:.4f}")
 
