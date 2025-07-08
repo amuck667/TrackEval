@@ -16,7 +16,7 @@ class MotChallenge2DKeypoints(_BaseDataset):
         default_config = {
             'GT_FOLDER': os.path.join(code_path, 'data/gt/'),
             'TRACKERS_FOLDER': os.path.join(code_path, 'data/trackers/'),
-            'OUTPUT_FOLDER': None,
+            'OUTPUT_FOLDER': os.path.join(code_path, 'data/out/'),
             'TRACKERS_TO_EVAL': None,
             'CLASSES_TO_EVAL': ['left hand', 'right hand', 'scissors', 'tweezers',
                                 'needle holder', 'needle'],
