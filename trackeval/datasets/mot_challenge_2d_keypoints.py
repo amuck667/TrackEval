@@ -298,6 +298,22 @@ class MotChallenge2DKeypoints(_BaseDataset):
                 filtered_data[time_key] = filtered_rows
         return filtered_data
 
+    def get_raw_seq_data(self, tracker, seq):
+        """
+        Overrides BaseDataset.get_raw_seq_data() to include visibilities in similarity calculations
+        """
+        raw_gt_data = self._load_raw_file(tracker, seq, is_gt=True)
+        raw_tracker_data = self._load_raw_file(tracker, seq, is_gt=False)
+        raw_data = {**raw_tracker_data, **raw_gt_data}
+
+        similarity_scores = []
+        for t, (gt_dets_t, tracker_dets_t, visibilities_t) in enumerate(zip(raw_data['gt_dets'], raw_data['tracker_dets'], raw_data['visibility'])):
+            # for a time step t
+            ious = self._calculate_similarities(gt_dets_t, tracker_dets_t, visibilities_t)
+            similarity_scores.append(ious)
+        raw_data['similarity_scores'] = similarity_scores
+        return raw_data
+
     def get_preprocessed_seq_data(self, raw_data, cls):
         """
         Preprocess data for a single sequence for a single class for keypoint-based MOT.
@@ -330,6 +346,13 @@ class MotChallenge2DKeypoints(_BaseDataset):
             keep_gt = (gt_classes == cls_id)
             data['gt_ids'][t] = gt_ids[keep_gt]
             data['gt_dets'][t] = gt_keypoints[keep_gt]
+            # remove non-visible gt objects because otherwise it would not be fair to compare them with tracker detections when the gt is uncertain
+            # partially non visible objects are already covered in the similarity scores (non-visible keypoints are dropped when calculating similarities)
+            gt_vis = raw_data['visibility'][t]
+            gt_vis = gt_vis[keep_gt]  # update visibility to match the kept gt objects
+            nvis_gt_all = np.all(gt_vis == 0, axis=1) | np.all(gt_vis == 0, axis=1)  # objects where all kps are not visible (out of frame and occluded)
+            data['gt_ids'][t] = data['gt_ids'][t][~nvis_gt_all]
+            data['gt_dets'][t] = data['gt_dets'][t][~nvis_gt_all]
             unique_gt_ids += list(np.unique(data['gt_ids'][t]))
             num_gt_dets += len(data['gt_ids'][t])
 
@@ -348,6 +371,8 @@ class MotChallenge2DKeypoints(_BaseDataset):
             num_tracker_dets += len(data['tracker_ids'][t])
 
             data['similarity_scores'][t] = similarity_scores[np.ix_(keep_gt, keep_tr)]  # select the submatrix where both masks are True, shape: (num_true_gt, num_true_tr)
+            data['similarity_scores'][t] = data['similarity_scores'][t][~nvis_gt_all, :]  # remove full row for non-visible gt objects from similarity scores
+            # should be fine since HOTA still covers false positive detections (extra tracker detections are left, only fully non visible gt objects are removed)👆
 
         # Overview stats
         data['num_gt_dets'] = num_gt_dets
@@ -360,16 +385,30 @@ class MotChallenge2DKeypoints(_BaseDataset):
         return data
 
 
-    def _calculate_similarities(self, gt_keypoints, tracker_keypoints, sigma=10):
-        # gt_keypoints: (N, K, 2), tracker_keypoints: (M, K, 2)
+    def _calculate_similarities(self, gt_keypoints, tracker_keypoints, visibilities, sigma=10):
+        """
+        Calculate similarity matrix between ground truth and tracker keypoints.
+        Args:
+            gt_keypoints: (N, K, 2) numpy array of ground truth keypoints (N objects, K keypoints per object of dim 2 (x,y))
+            tracker_keypoints: (M, K, 2) numpy array of tracker keypoints
+            visibilities: (N, K) numpy array of visibility for each keypoint (0 - out of frame, 1 - hidden, 2 - visible)
+                          Only for gt objects!!
+            sigma: standard deviation for Gaussian similarity.
+                   A larger sigma makes the similarity less sensitive to distance
+                   (higher similarity for larger distances), while a smaller sigma
+                   makes the similarity drop off more quickly as distance increases.
+        Returns: Similarity matrix for objects (N, M) where N is the number of ground truth objects and M is the number of tracker objects.
+        """
         if gt_keypoints.shape[0] == 0 or tracker_keypoints.shape[0] == 0:
             return np.zeros((gt_keypoints.shape[0], tracker_keypoints.shape[0]))
+
         # If number of keypoints differs, only compare up to the minimum
         if gt_keypoints.shape[1] != tracker_keypoints.shape[1]:
             print(f"Warning: truncating keypoints to the minimum number of keypoints in gt and tracker. GT: {gt_keypoints.shape[1]}, Tracker: {tracker_keypoints.shape[1]}")
         min_kps = min(gt_keypoints.shape[1], tracker_keypoints.shape[1])
         gt_kps = gt_keypoints[:, :min_kps, :]
         trk_kps = tracker_keypoints[:, :min_kps, :]
+        vis = visibilities[:, :min_kps]
         # Compute mean Euclidean distance for each pair
         N, K, _ = gt_kps.shape  # N GT objects, K keypoints per object
         M, _, _ = trk_kps.shape  # M predicted objects, K keypoints per object
@@ -381,8 +420,14 @@ class MotChallenge2DKeypoints(_BaseDataset):
         for i in range(N):
             for j in range(M):
                 # Compute mean Euclidean distance across keypoints
-                dist_matrix[i, j] = np.mean(np.linalg.norm(gt_kps[i] - trk_kps[j], axis=1))
+                valid_mask = (vis[i] == 2)  # Only use visible keypoints - occluded and out of frame keypoints are not a good enough gt
+                if np.any(valid_mask):
+                    dists = np.linalg.norm(gt_kps[i][valid_mask] - trk_kps[j][valid_mask], axis=1)
+                    dist_matrix[i, j] = np.mean(dists)
+                else:
+                    dist_matrix[i, j] = np.inf  # just a placeholder - if gt object has no visible keypoints, it gets dropped later in get_preprocessed_seq_data()
         # Convert distance to similarity (Gaussian similarity)
         similarity = np.exp(-dist_matrix ** 2 / (
                     2 * sigma ** 2))  # lower distances gives higher similarity score
+        similarity[dist_matrix == np.inf] = 0  # No valid keypoints - placeholder, will be dropped later
         return similarity
