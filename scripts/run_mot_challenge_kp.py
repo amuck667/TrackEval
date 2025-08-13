@@ -1,3 +1,4 @@
+import csv
 import sys
 import os
 import argparse
@@ -69,15 +70,26 @@ if __name__ == '__main__':
 
     results = evaluator.evaluate(dataset_list, metrics_list)[0]['MotChallenge2DKeypoints']
     results2 = evaluator.evaluate(dataset_list2, metrics_list)[0]['MotChallenge2DKeypoints']
-    # combine results from hands and tools
+    # combine results from hands and tools and save to file
+    outfile = os.path.join(default_dataset_config['OUTPUT_FOLDER'], 'hota', 'mot_challenge_kp_results.csv')
+    os.makedirs(os.path.dirname(outfile), exist_ok=True)
     combined_seq = {}
-    for tracker in results.keys():
-        if tracker in results2:
-            combined_seq1 = results[tracker]['COMBINED_SEQ']
-            combined_seq2 = results2[tracker]['COMBINED_SEQ']
-            combined_seq = {**combined_seq1, **combined_seq2}
-            combined_hota_seq = {cls_key: cls_value['HOTA'] for cls_key, cls_value in combined_seq.items()}
-            final_res_all = metrics_list[0].combine_classes_class_averaged(combined_hota_seq)
-            result_hota = sum(final_res_all['HOTA'])/len(final_res_all['HOTA'])
-            print(f"Combined HOTA for tracker {tracker}: {result_hota:.4f}")
-
+    with open(outfile, 'w', newline='') as csvfile:
+        fieldnames = ['TRACKER', 'SEQ', 'HOTA']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        for tracker in results.keys():
+            assert tracker in results2
+            tracker_results1 = results[tracker]
+            tracker_results2 = results2[tracker]
+            sequences = tracker_results1.keys()
+            assert sequences == tracker_results2.keys(), "Mismatch in sequences between two datasets"
+            for seq in sequences:
+                combined_seq1 = tracker_results1[seq]
+                combined_seq2 = tracker_results2[seq]
+                combined_seq = {**combined_seq1, **combined_seq2}
+                combined_hota_seq = {cls_key: cls_value['HOTA'] for cls_key, cls_value in combined_seq.items()}
+                final_res_all = metrics_list[0].combine_classes_class_averaged(combined_hota_seq)
+                result_hota = sum(final_res_all['HOTA'])/len(final_res_all['HOTA'])
+                if seq == "COMBINED_SEQ": print(f"Combined HOTA for tracker {tracker}: {result_hota:.4f}")
+                writer.writerow({'TRACKER': tracker, 'SEQ': seq, 'HOTA': f"{result_hota}"})
