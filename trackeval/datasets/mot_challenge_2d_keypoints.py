@@ -148,11 +148,9 @@ class MotChallenge2DKeypoints(_BaseDataset):
             # If sequence length is 'None' tries to read sequence length from .ini files.
             for seq, seq_length in seq_lengths.items():
                 if isinstance(seq_length, dict): # added to include frame rate which is needed for parsing raw data file
-                    seq_list.append(seq)
                     seq_lengths[seq] = seq_length.get('length')
                     seq_frame_rates[seq] = seq_length.get('frame_rate')
                 else:
-                    seq_list.append(seq)
                     seq_lengths[seq] = seq_length
                     seq_frame_rates[seq] = None
 

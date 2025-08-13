@@ -46,11 +46,12 @@ if __name__ == '__main__':
     metrics_config = {k: v for k, v in config.items() if k in default_metrics_config.keys()}
 
     # hands and tools must be evaluated separately
-    dataset_config1["SEQ_INFO"] = { 'P11H': {'length': 1740, 'frame_rate': 29}, }
+    sequence_info = { 'P11H': {'length': 1740, 'frame_rate': 29}, 'E66F': {'length': 1827, 'frame_rate': 29}, }
+    dataset_config1["SEQ_INFO"] = sequence_info.copy()
     dataset_config1['CLASSES_TO_EVAL'] = ['scissors', 'tweezers', 'needle holder', 'needle']
     dataset_config1['PREFILTER_RAW'] = True
     dataset_config1['OUTPUT_SUB_FOLDER'] = 'tools'
-    dataset_config2["SEQ_INFO"] = {'P11H': {'length': 1740, 'frame_rate': 29}, }
+    dataset_config2["SEQ_INFO"] = sequence_info.copy()
     dataset_config2['CLASSES_TO_EVAL'] = ['left hand', 'right hand']
     dataset_config2['PREFILTER_RAW'] = True
     dataset_config2['OUTPUT_SUB_FOLDER'] = 'hands'
