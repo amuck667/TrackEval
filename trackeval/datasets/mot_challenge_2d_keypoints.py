@@ -233,9 +233,9 @@ class MotChallenge2DKeypoints(_BaseDataset):
         extra_time_keys = [x for x in read_data.keys() if x not in current_time_keys]
         if len(extra_time_keys) > 0:
             text = 'Ground-truth' if is_gt else 'Tracking'
-            raise TrackEvalException(
-                text + ' data contains the following invalid timesteps in seq %s: ' % seq + ', '.join(
+            print('Warning! ' + text + ' data contains the following invalid timesteps in seq %s: ' % seq + ', '.join(
                     [str(x) + ', ' for x in extra_time_keys]))
+            print('These timesteps will be ignored during evaluation as they are not part of ground truth data.')
 
         if self.prefilter_raw:
             # Some files have different classes with different amounts of keypoints, so we filter the data accordingly
@@ -283,7 +283,7 @@ class MotChallenge2DKeypoints(_BaseDataset):
         return raw_data
 
     def _filter_data(self, read_data):
-        # Filter out data that is not relevant for tools
+        # Filter out data that is not relevant for tools/hands
         filtered_data = {}
         class_ids = [self.class_name_to_class_id[cls] for cls in self.class_list]
         for time_key, data in read_data.items():
