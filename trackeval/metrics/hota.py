@@ -204,7 +204,9 @@ class HOTA(_BaseMetric):
         plt.clf()
 
 class KP_HOTA(HOTA):
-    """Class which implements the HOTA metrics with keypoint distance matching.
+    """
+    DEPRECATED: KP HOTA logic can be solved by calculating distance based similarities while mot file parsing and just using the original HOTA metric - less mess and preserves actual HOTA logic. (that's how it's done in run_mot_challenge_kp)
+    Class which implements the HOTA metrics with keypoint distance matching.
     See: https://link.springer.com/article/10.1007/s11263-020-01375-2
     """
 
@@ -287,9 +289,12 @@ class KP_HOTA(HOTA):
             gt_id_count[gt_ids_t] += 1
             tracker_id_count[0, tracker_ids_t] += 1
 
-        # Apply softmax normalization to the accumulated similarity scores
-        # This evaluates how well a tracker maintains correct associations between detections across frames and helps balance local (frame-wise) and global (over time) associations.
-        global_alignment_score = scipy.special.softmax(potential_matches_count, axis=1)
+        # Calculate overall Jaccard alignment score (before unique matching). JAS evaluates how well a tracker maintains correct associations between detections across frames. This helps balance local (frame-wise) and global (over time) associations.
+        eps = np.finfo(float).eps
+        global_alignment_score = potential_matches_count / np.maximum(
+            eps,
+            gt_id_count + tracker_id_count - potential_matches_count
+        )
 
         # Initialize variables for counting matches
         matches_counts = [np.zeros_like(potential_matches_count) for _ in self.array_labels]
@@ -362,7 +367,7 @@ class KP_HOTA(HOTA):
         dist_matrix = self.compute_keypoint_distances(gt_keypoints_t, tracker_keypoints_t)
         # Convert distance to similarity (Gaussian similarity) under consideration of confidence scores
         # confidence_matrix ensures that uncertain keypoints don’t dominate matching, leave out if confidence too noisy
-        similarity = np.exp(-dist_matrix ** 2 / (2 * sigma ** 2)) * confidence_matrix  # lower distances gives higher similarity score
+        similarity = np.exp(-dist_matrix ** 2 / (2 * sigma ** 2))# * confidence_matrix  # lower distances gives higher similarity score
 
         return similarity
 
