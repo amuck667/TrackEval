@@ -372,6 +372,22 @@ class MotChallenge2DKeypoints(_BaseDataset):
             data['similarity_scores'][t] = data['similarity_scores'][t][~nvis_gt_all, :]  # remove full row for non-visible gt objects from similarity scores
             # should be fine since HOTA still covers false positive detections (extra tracker detections are left, only fully non visible gt objects are removed)👆
 
+        # Re-label IDs such that there are no empty IDs
+        if len(unique_gt_ids) > 0:
+            unique_gt_ids = np.unique(unique_gt_ids)
+            gt_id_map = np.nan * np.ones((np.max(unique_gt_ids) + 1))
+            gt_id_map[unique_gt_ids] = np.arange(len(unique_gt_ids))
+            for t in range(raw_data['num_timesteps']):
+                if len(data['gt_ids'][t]) > 0:
+                    data['gt_ids'][t] = gt_id_map[data['gt_ids'][t]].astype(np.int32)
+        if len(unique_tracker_ids) > 0:
+            unique_tracker_ids = np.unique(unique_tracker_ids)
+            tracker_id_map = np.nan * np.ones((np.max(unique_tracker_ids) + 1))
+            tracker_id_map[unique_tracker_ids] = np.arange(len(unique_tracker_ids))
+            for t in range(raw_data['num_timesteps']):
+                if len(data['tracker_ids'][t]) > 0:
+                    data['tracker_ids'][t] = tracker_id_map[data['tracker_ids'][t]].astype(np.int32)
+        
         # Overview stats
         data['num_gt_dets'] = num_gt_dets
         data['num_tracker_dets'] = num_tracker_dets
