@@ -47,6 +47,11 @@ def hota_metric():
     """Instantiate the HOTA metric"""
     return HOTA()
 
+@pytest.fixture
+def base_gt_keypoints(num_keypoints):
+    rng = np.random.default_rng(42)
+    return rng.uniform(100, 400, size=(5, num_keypoints, 2))
+
 
 @pytest.fixture
 def dataset_instance():
@@ -944,6 +949,480 @@ class TestDiagnosticReport:
         print("\nNote: LocA defaults to 1.0 at any alpha where HOTA_TP=0 (no matches pass threshold).")
         print("This causes mean LocA to INCREASE at large offsets — this is expected HOTA behavior.")
         print("DetA and HOTA correctly capture the degradation.\n")
+        assert False
+
+# ============================================================
+# TEST: HOTA Per-Alpha Diagnostic
+# ============================================================
+
+class TestHOTAAlphaBreakdown:
+    """Diagnostic tests showing HOTA behavior at each alpha threshold."""
+
+    def _make_offset_data(self, offset, base_gt_kps, sigma):
+        num_objects = base_gt_kps.shape[0]
+        num_kps = base_gt_kps.shape[1]
+
+        def tracker_kps_fn(t, n, k):
+            return base_gt_kps + offset
+
+        def gt_kps_fn(t, n, k):
+            return base_gt_kps.copy()
+
+        return make_synthetic_sequence_data(
+            num_timesteps=20,
+            num_objects=num_objects,
+            num_keypoints=num_kps,
+            gt_keypoints_fn=gt_kps_fn,
+            tracker_keypoints_fn=tracker_kps_fn,
+            sigma=sigma,
+        )
+
+    def test_hota_per_alpha_with_offsets(self, hota_metric, sigma, base_gt_keypoints, capsys):
+        """
+        Print full HOTA breakdown per alpha for each offset.
+        Shows exactly where matches start failing at each threshold.
+        
+        Run with: pytest test_hota_alpha_breakdown.py::TestHOTAAlphaBreakdown::test_hota_per_alpha_with_offsets -v -s
+        """
+        alphas = np.arange(0.05, 0.99, 0.05)
+        offsets = [0, 2, 5, 7, 10, 12, 15, 20, 25, 30]
+        num_objects = base_gt_kps = base_gt_keypoints.shape[0]
+        total_dets_per_frame = base_gt_keypoints.shape[0]
+        num_timesteps = 20
+        total_gt_dets = total_dets_per_frame * num_timesteps
+
+        # Precompute: what similarity does each offset produce?
+        print("\n" + "=" * 100)
+        print(f"HOTA PER-ALPHA DIAGNOSTIC (sigma={sigma}, {base_gt_keypoints.shape[0]} objects, "
+              f"{base_gt_keypoints.shape[1]} keypoints, {num_timesteps} frames)")
+        print("=" * 100)
+
+        print(f"\n--- Offset → Similarity Mapping (diagonal offset in x,y) ---")
+        print(f"{'Offset (px)':<12} {'Eucl. Dist':<12} {'Similarity':<12} {'Highest alpha passed':<25}")
+        print("-" * 60)
+        for offset in offsets:
+            eucl_dist = offset * np.sqrt(2)  # diagonal offset
+            sim = np.exp(-eucl_dist ** 2 / (2 * sigma ** 2))
+            passing = alphas[alphas <= sim + np.finfo(float).eps]
+            highest_alpha = passing[-1] if len(passing) > 0 else 0.0
+            print(f"{offset:<12} {eucl_dist:<12.2f} {sim:<12.6f} {highest_alpha:<25.2f}")
+
+        # Full HOTA per-alpha table
+        print(f"\n--- HOTA at each alpha threshold ---")
+        # Header
+        header = f"{'Offset':<8}"
+        selected_alpha_indices = [0, 2, 4, 6, 9, 13, 17, 18]  # α=0.05, 0.15, 0.25, 0.35, 0.50, 0.70, 0.90, 0.95
+        for idx in selected_alpha_indices:
+            header += f"α={alphas[idx]:<5.2f} "
+        header += f"{'Mean':<8}"
+        print(header)
+        print("-" * (8 + 9 * len(selected_alpha_indices) + 8))
+
+        all_results = {}
+        for offset in offsets:
+            data = self._make_offset_data(offset, base_gt_keypoints, sigma)
+            res = hota_metric.eval_sequence(data)
+            all_results[offset] = res
+
+            row = f"{offset:<8}"
+            for idx in selected_alpha_indices:
+                row += f"{res['HOTA'][idx]:<9.4f}"
+            row += f"{np.mean(res['HOTA']):<8.4f}"
+            print(row)
+
+        # DetA per-alpha table
+        print(f"\n--- DetA at each alpha threshold ---")
+        header = f"{'Offset':<8}"
+        for idx in selected_alpha_indices:
+            header += f"α={alphas[idx]:<5.2f} "
+        header += f"{'Mean':<8}"
+        print(header)
+        print("-" * (8 + 9 * len(selected_alpha_indices) + 8))
+
+        for offset in offsets:
+            res = all_results[offset]
+            row = f"{offset:<8}"
+            for idx in selected_alpha_indices:
+                row += f"{res['DetA'][idx]:<9.4f}"
+            row += f"{np.mean(res['DetA']):<8.4f}"
+            print(row)
+
+        # TP / FN / FP per-alpha table
+        print(f"\n--- HOTA_TP at each alpha threshold (total GT dets = {total_gt_dets}) ---")
+        header = f"{'Offset':<8}"
+        for idx in selected_alpha_indices:
+            header += f"α={alphas[idx]:<5.2f} "
+        print(header)
+        print("-" * (8 + 9 * len(selected_alpha_indices)))
+
+        for offset in offsets:
+            res = all_results[offset]
+            row = f"{offset:<8}"
+            for idx in selected_alpha_indices:
+                row += f"{int(res['HOTA_TP'][idx]):<9}"
+            print(row)
+
+        # LocA per-alpha table (showing vacuous truth)
+        print(f"\n--- LocA at each alpha threshold (1.0* = vacuous, HOTA_TP=0) ---")
+        header = f"{'Offset':<8}"
+        for idx in selected_alpha_indices:
+            header += f"α={alphas[idx]:<5.2f} "
+        header += f"{'Mean':<8}"
+        print(header)
+        print("-" * (8 + 9 * len(selected_alpha_indices) + 8))
+
+        for offset in offsets:
+            res = all_results[offset]
+            row = f"{offset:<8}"
+            for idx in selected_alpha_indices:
+                is_vacuous = res['HOTA_TP'][idx] == 0
+                val = res['LocA'][idx]
+                marker = "*" if is_vacuous else " "
+                row += f"{val:<5.3f}{marker}   "
+            row += f"{np.mean(res['LocA']):<8.4f}"
+            print(row)
+
+        # AssA per-alpha table
+        print(f"\n--- AssA at each alpha threshold ---")
+        header = f"{'Offset':<8}"
+        for idx in selected_alpha_indices:
+            header += f"α={alphas[idx]:<5.2f} "
+        header += f"{'Mean':<8}"
+        print(header)
+        print("-" * (8 + 9 * len(selected_alpha_indices) + 8))
+
+        for offset in offsets:
+            res = all_results[offset]
+            row = f"{offset:<8}"
+            for idx in selected_alpha_indices:
+                row += f"{res['AssA'][idx]:<9.4f}"
+            row += f"{np.mean(res['AssA']):<8.4f}"
+            print(row)
+
+        print("\n" + "=" * 100)
+        print("END HOTA PER-ALPHA DIAGNOSTIC")
+        print("=" * 100 + "\n")
+
+        assert False  # Diagnostic only
+
+    def test_hota_monotonic_per_alpha(self, hota_metric, sigma, base_gt_keypoints):
+        """
+        Verify that HOTA at EACH individual alpha is monotonically non-increasing
+        as offset increases. This is the key behavioral property.
+        """
+        offsets = [0, 2, 5, 7, 10, 12, 15, 20, 25, 30]
+        alphas = np.arange(0.05, 0.99, 0.05)
+        
+        # Collect HOTA at each alpha for each offset
+        hota_per_alpha = []  # shape will be (num_offsets, num_alphas)
+        for offset in offsets:
+            data = self._make_offset_data(offset, base_gt_keypoints, sigma)
+            res = hota_metric.eval_sequence(data)
+            hota_per_alpha.append(res['HOTA'].copy())
+
+        hota_per_alpha = np.array(hota_per_alpha)  # (num_offsets, num_alphas)
+
+        # Check monotonic decrease at each alpha independently
+        violations = []
+        for a_idx in range(len(alphas)):
+            for i in range(len(offsets) - 1):
+                if hota_per_alpha[i, a_idx] < hota_per_alpha[i + 1, a_idx] - 1e-10:
+                    violations.append(
+                        f"  α={alphas[a_idx]:.2f}: offset {offsets[i]}→{offsets[i+1]}, "
+                        f"HOTA {hota_per_alpha[i, a_idx]:.6f} → {hota_per_alpha[i+1, a_idx]:.6f}"
+                    )
+
+        assert len(violations) == 0, (
+            f"HOTA is NOT monotonically non-increasing at {len(violations)} alpha/offset pairs:\n"
+            + "\n".join(violations[:20])
+        )
+
+    def test_hota_transitions_from_one_to_zero(self, hota_metric, sigma, base_gt_keypoints):
+        """
+        For a uniform offset, HOTA at a given alpha should transition cleanly:
+        - HOTA = sqrt(DetA * AssA) = sqrt(1.0 * 1.0) = 1.0 when similarity >= alpha
+        - HOTA = 0.0 when similarity < alpha (all objects become FN/FP)
+        
+        This verifies the binary nature of the match/no-match decision at each alpha.
+        """
+        alphas = np.arange(0.05, 0.99, 0.05)
+        offsets = [0, 5, 10, 15, 20, 30]
+
+        for offset in offsets:
+            data = self._make_offset_data(offset, base_gt_keypoints, sigma)
+            res = hota_metric.eval_sequence(data)
+
+            # Compute expected similarity for this uniform offset
+            eucl_dist = offset * np.sqrt(2)
+            expected_sim = np.exp(-eucl_dist ** 2 / (2 * sigma ** 2))
+
+            for a_idx, alpha in enumerate(alphas):
+                if expected_sim >= alpha - np.finfo(float).eps:
+                    # All objects should match → HOTA should be 1.0
+                    assert res['HOTA'][a_idx] > 0.99, (
+                        f"Offset={offset}, α={alpha:.2f}: similarity={expected_sim:.4f} >= alpha, "
+                        f"but HOTA={res['HOTA'][a_idx]:.4f} (expected ~1.0)"
+                    )
+                else:
+                    # No objects should match → HOTA should be 0.0
+                    assert res['HOTA'][a_idx] < 0.01, (
+                        f"Offset={offset}, α={alpha:.2f}: similarity={expected_sim:.4f} < alpha, "
+                        f"but HOTA={res['HOTA'][a_idx]:.4f} (expected ~0.0)"
+                    )
+
+    def test_hota_critical_alpha_boundary(self, hota_metric, sigma, base_gt_keypoints):
+        """
+        Find the critical alpha for each offset (the threshold where matches start failing)
+        and verify it aligns with the expected similarity value.
+        """
+        alphas = np.arange(0.05, 0.99, 0.05)
+        offsets = [2, 5, 7, 10, 12, 15]
+
+        for offset in offsets:
+            data = self._make_offset_data(offset, base_gt_keypoints, sigma)
+            res = hota_metric.eval_sequence(data)
+
+            # Expected similarity
+            eucl_dist = offset * np.sqrt(2)
+            expected_sim = np.exp(-eucl_dist ** 2 / (2 * sigma ** 2))
+
+            # Find where HOTA transitions from ~1 to ~0
+            hota_vals = res['HOTA']
+            critical_idx = None
+            for a_idx in range(len(alphas) - 1):
+                if hota_vals[a_idx] > 0.5 and hota_vals[a_idx + 1] < 0.5:
+                    critical_idx = a_idx
+                    break
+
+            if critical_idx is not None:
+                # The critical alpha should be close to the expected similarity
+                critical_alpha = alphas[critical_idx]
+                assert abs(critical_alpha - expected_sim) < 0.10, (
+                    f"Offset={offset}: critical alpha={critical_alpha:.2f} but "
+                    f"expected similarity={expected_sim:.4f}. Mismatch > 0.10"
+                )
+
+    def test_hota_with_noise_per_alpha(self, hota_metric, sigma, num_keypoints, capsys):
+        """
+        More realistic scenario: variable noise per object, showing how HOTA
+        degrades gradually across alphas rather than the binary transition of uniform offset.
+        
+        Run with: pytest test_hota_alpha_breakdown.py::TestHOTAAlphaBreakdown::test_hota_with_noise_per_alpha -v -s
+        """
+        alphas = np.arange(0.05, 0.99, 0.05)
+        rng = np.random.default_rng(42)
+        num_objects = 8
+        num_timesteps = 30
+        base_kps = rng.uniform(100, 400, size=(num_objects, num_keypoints, 2))
+
+        noise_scales = [0, 0.25, 0.5, 1.0, 1.5, 2.0, 3.0]  # multiples of sigma
+
+        print("\n" + "=" * 100)
+        print(f"HOTA PER-ALPHA WITH GAUSSIAN NOISE (sigma={sigma})")
+        print("(noise_scale = std of noise as fraction of sigma)")
+        print("=" * 100)
+
+        selected_alpha_indices = [0, 2, 4, 6, 9, 13, 17, 18]
+
+        # HOTA table
+        print(f"\n--- HOTA ---")
+        header = f"{'Noise':<8}"
+        for idx in selected_alpha_indices:
+            header += f"α={alphas[idx]:<5.2f} "
+        header += f"{'Mean':<8}"
+        print(header)
+        print("-" * (8 + 9 * len(selected_alpha_indices) + 8))
+
+        all_results = {}
+        for ns in noise_scales:
+            def tracker_fn(t, n, k, _ns=ns):
+                noise = rng.standard_normal((n, k, 2)) * (_ns * sigma)
+                return base_kps + noise
+
+            data = make_synthetic_sequence_data(
+                num_timesteps=num_timesteps,
+                num_objects=num_objects,
+                num_keypoints=num_keypoints,
+                gt_keypoints_fn=lambda t, n, k: base_kps.copy(),
+                tracker_keypoints_fn=tracker_fn,
+                sigma=sigma,
+            )
+            res = hota_metric.eval_sequence(data)
+            all_results[ns] = res
+
+            row = f"{ns:<8.2f}"
+            for idx in selected_alpha_indices:
+                row += f"{res['HOTA'][idx]:<9.4f}"
+            row += f"{np.mean(res['HOTA']):<8.4f}"
+            print(row)
+
+        # DetA table
+        print(f"\n--- DetA ---")
+        header = f"{'Noise':<8}"
+        for idx in selected_alpha_indices:
+            header += f"α={alphas[idx]:<5.2f} "
+        header += f"{'Mean':<8}"
+        print(header)
+        print("-" * (8 + 9 * len(selected_alpha_indices) + 8))
+
+        for ns in noise_scales:
+            res = all_results[ns]
+            row = f"{ns:<8.2f}"
+            for idx in selected_alpha_indices:
+                row += f"{res['DetA'][idx]:<9.4f}"
+            row += f"{np.mean(res['DetA']):<8.4f}"
+            print(row)
+
+        # TP table
+        total_gt = num_objects * num_timesteps
+        print(f"\n--- HOTA_TP (out of {total_gt} total GT dets) ---")
+        header = f"{'Noise':<8}"
+        for idx in selected_alpha_indices:
+            header += f"α={alphas[idx]:<5.2f} "
+        print(header)
+        print("-" * (8 + 9 * len(selected_alpha_indices)))
+
+        for ns in noise_scales:
+            res = all_results[ns]
+            row = f"{ns:<8.2f}"
+            for idx in selected_alpha_indices:
+                row += f"{int(res['HOTA_TP'][idx]):<9}"
+            print(row)
+
+        # Similarity distribution stats
+        print(f"\n--- Similarity Score Statistics per Noise Level ---")
+        print(f"{'Noise':<8} {'Min Sim':<10} {'Mean Sim':<10} {'Max Sim':<10} {'Std Sim':<10} {'% > 0.5':<10} {'% > 0.05':<10}")
+        print("-" * 68)
+
+        for ns in noise_scales:
+            def tracker_fn_diag(t, n, k, _ns=ns):
+                noise = rng.standard_normal((n, k, 2)) * (_ns * sigma)
+                return base_kps + noise
+
+            # Collect diagonal similarities (true match pairs)
+            sims_diag = []
+            for t in range(num_timesteps):
+                gt_kps = base_kps.copy()
+                tr_kps = tracker_fn_diag(t, num_objects, num_keypoints)
+                vis = np.full((num_objects, num_keypoints), 2)
+                sim = _compute_similarity(gt_kps, tr_kps, vis, sigma)
+                sims_diag.extend(np.diag(sim).tolist())
+
+            sims_diag = np.array(sims_diag)
+            print(f"{ns:<8.2f} {sims_diag.min():<10.4f} {sims_diag.mean():<10.4f} "
+                  f"{sims_diag.max():<10.4f} {sims_diag.std():<10.4f} "
+                  f"{np.mean(sims_diag > 0.5)*100:<10.1f} {np.mean(sims_diag > 0.05)*100:<10.1f}")
+
+        print("\n" + "=" * 100)
+        print("END HOTA PER-ALPHA WITH NOISE DIAGNOSTIC")
+        print("=" * 100 + "\n")
+
+        assert False
+
+    def test_hota_alpha_active_range(self, hota_metric, sigma, base_gt_keypoints):
+        """
+        Verify that the alpha sweep is 'active' — that different alphas produce
+        meaningfully different HOTA scores for a realistic noise scenario.
+        
+        If all alphas give the same HOTA, the metric lacks discriminative power.
+        """
+        rng = np.random.default_rng(42)
+        num_objects = base_gt_keypoints.shape[0]
+        num_kps = base_gt_keypoints.shape[1]
+
+        # Moderate noise: sigma * 0.75 std
+        def tracker_fn(t, n, k):
+            noise = rng.standard_normal((n, k, 2)) * (sigma * 0.75)
+            return base_gt_keypoints + noise
+
+        data = make_synthetic_sequence_data(
+            num_timesteps=30,
+            num_objects=num_objects,
+            num_keypoints=num_kps,
+            gt_keypoints_fn=lambda t, n, k: base_gt_keypoints.copy(),
+            tracker_keypoints_fn=tracker_fn,
+            sigma=sigma,
+        )
+        res = hota_metric.eval_sequence(data)
+
+        hota_range = res['HOTA'].max() - res['HOTA'].min()
+        assert hota_range > 0.15, (
+            f"HOTA range across alphas = {hota_range:.4f}. "
+            f"Too narrow — alphas are not differentiating quality.\n"
+            f"HOTA values: {np.round(res['HOTA'], 3)}\n"
+            f"Consider {'decreasing' if res['HOTA'].min() > 0.8 else 'increasing'} sigma."
+        )
+
+    def test_hota_no_partial_matches_uniform_offset(self, hota_metric, sigma, base_gt_keypoints):
+        """
+        With uniform offset (all objects identical similarity), at each alpha
+        either ALL objects match or NONE match. Verify this binary behavior.
+        
+        This confirms the metric doesn't produce partial TP counts for uniform data.
+        """
+        alphas = np.arange(0.05, 0.99, 0.05)
+        num_timesteps = 20
+        total_dets = base_gt_keypoints.shape[0] * num_timesteps
+
+        for offset in [5, 10, 15]:
+            data = self._make_offset_data(offset, base_gt_keypoints, sigma)
+            res = hota_metric.eval_sequence(data)
+
+            for a_idx, alpha in enumerate(alphas):
+                tp = res['HOTA_TP'][a_idx]
+                # Should be either all matched or none matched
+                assert tp == total_dets or tp == 0, (
+                    f"Offset={offset}, α={alpha:.2f}: HOTA_TP={int(tp)}, expected "
+                    f"either {total_dets} (all match) or 0 (none match). "
+                    f"Partial matching shouldn't happen with uniform offset."
+                )
+
+    def test_hota_per_alpha_combined_summary(self, hota_metric, sigma, base_gt_keypoints, capsys):
+        """
+        Single combined table showing the interplay between offset, alpha,
+        and all key metrics side by side for quick visual inspection.
+        
+        Run with: pytest test_hota_alpha_breakdown.py::TestHOTAAlphaBreakdown::test_hota_per_alpha_combined_summary -v -s
+        """
+        alphas = np.arange(0.05, 0.99, 0.05)
+        offsets = [0, 5, 10, 15, 20]
+
+        print("\n" + "=" * 90)
+        print(f"COMBINED PER-ALPHA SUMMARY (sigma={sigma})")
+        print("=" * 90)
+
+        for offset in offsets:
+            data = self._make_offset_data(offset, base_gt_keypoints, sigma)
+            res = hota_metric.eval_sequence(data)
+
+            eucl_dist = offset * np.sqrt(2)
+            sim = np.exp(-eucl_dist**2 / (2 * sigma**2))
+
+            print(f"\n┌─ Offset = {offset}px | Eucl. Distance = {eucl_dist:.2f}px | Similarity = {sim:.6f} ─┐")
+            print(f"{'Alpha':<8} {'HOTA':<8} {'DetA':<8} {'AssA':<8} {'LocA':<8} {'TP':<6} {'FN':<6} {'FP':<6} {'Match?':<8}")
+            print("-" * 68)
+
+            for a_idx in range(0, len(alphas), 2):  # every other alpha for readability
+                alpha = alphas[a_idx]
+                matched = "YES" if sim >= alpha - np.finfo(float).eps else "no"
+                print(f"{alpha:<8.2f} {res['HOTA'][a_idx]:<8.4f} {res['DetA'][a_idx]:<8.4f} "
+                      f"{res['AssA'][a_idx]:<8.4f} {res['LocA'][a_idx]:<8.4f} "
+                      f"{int(res['HOTA_TP'][a_idx]):<6} {int(res['HOTA_FN'][a_idx]):<6} "
+                      f"{int(res['HOTA_FP'][a_idx]):<6} {matched:<8}")
+
+            print(f"{'MEAN':<8} {np.mean(res['HOTA']):<8.4f} {np.mean(res['DetA']):<8.4f} "
+                  f"{np.mean(res['AssA']):<8.4f} {np.mean(res['LocA']):<8.4f}")
+
+        print("\n" + "=" * 90)
+        print("Notes:")
+        print("- 'Match?' = whether similarity >= alpha (does the match pass this threshold?)")
+        print("- When Match?=no: TP=0, FN=all_gt, FP=all_tracker → DetA=0 → HOTA=0")
+        print("- LocA=1.0 when TP=0 is vacuous truth (no matches to measure localization on)")
+        print(f"- Critical distance for α=0.05: {sigma * np.sqrt(-2 * np.log(0.05)):.1f}px")
+        print(f"- Critical distance for α=0.50: {sigma * np.sqrt(-2 * np.log(0.50)):.1f}px")
+        print(f"- Critical distance for α=0.95: {sigma * np.sqrt(-2 * np.log(0.95)):.1f}px")
+        print("=" * 90 + "\n")
+
         assert False
 
 
